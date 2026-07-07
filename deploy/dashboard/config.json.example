@@ -15,5 +15,6 @@
     "sceneCamera": "http://SCENE_CAM_HOST:8080/stream.mjpg",
     "inspectionCamera": ""
   },
-  "run": { "dryRun": true, "stepDelayMs": 700 }
+  "run": { "dryRun": true, "stepDelayMs": 700 },
+  "apiToken": ""
 }

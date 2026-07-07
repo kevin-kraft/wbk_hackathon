@@ -16,6 +16,7 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}
       - REFERENCE_DIR=/app/damage/reference
+      - WBK_API_TOKEN=${WBK_API_TOKEN:-}
     # volumes:
     #   - ./reference:/reference:ro   # and set REFERENCE_DIR=/reference
     restart: unless-stopped

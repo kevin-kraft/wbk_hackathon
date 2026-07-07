@@ -11,7 +11,7 @@ from ..models import Inspection, PartDetection
 class HttpDamage:
     def __init__(self, config: OrchestratorConfig) -> None:
         self.c = config
-        self._http = httpx.Client(timeout=config.http_timeout_s)
+        self._http = httpx.Client(timeout=config.http_timeout_s, headers=config.auth_headers)
 
     def inspect(self, images_b64: list[str], part: PartDetection) -> Inspection:
         r = self._http.post(

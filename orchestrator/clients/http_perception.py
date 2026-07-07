@@ -11,7 +11,7 @@ from ..models import Box, PartDetection, SceneFrame
 class HttpPerception:
     def __init__(self, config: OrchestratorConfig) -> None:
         self.c = config
-        self._http = httpx.Client(timeout=config.http_timeout_s)
+        self._http = httpx.Client(timeout=config.http_timeout_s, headers=config.auth_headers)
 
     def next_part(self, frame: SceneFrame) -> PartDetection | None:
         # LocateAnything: text query -> ranked boxes/points.

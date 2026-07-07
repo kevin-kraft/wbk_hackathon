@@ -17,6 +17,9 @@ export interface RuntimeConfig {
   services: Record<ServiceKey, string>;
   streams: Record<StreamKey, string>;
   run: { dryRun: boolean; stepDelayMs: number };
+  // Shared API token sent to the orchestrator (Bearer header on POST, ?token= on
+  // SSE). Empty = don't send one. Matches the services' WBK_API_TOKEN.
+  apiToken: string;
 }
 
 // --- Orchestrator loop events (mirrors orchestrator/models.py:LoopEvent) ---

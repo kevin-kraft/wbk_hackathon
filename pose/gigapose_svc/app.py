@@ -10,10 +10,11 @@ from __future__ import annotations
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from gigapose_svc.model import GigaPoseRunner
+from shared.auth import require_token
 from shared.imaging import K_from_flat, decode_depth_m, decode_mask, decode_rgb
 from shared.schemas import ObjectPose, PoseHealth, PoseRequest, PoseResponse, PoseTimings
 
@@ -41,7 +42,7 @@ def health() -> PoseHealth:
     )
 
 
-@app.post("/pose", response_model=PoseResponse)
+@app.post("/pose", response_model=PoseResponse, dependencies=[Depends(require_token)])
 def pose(req: PoseRequest) -> PoseResponse:
     use_depth = req.pipeline == "rgbd"
     if use_depth and not req.depth_b64:

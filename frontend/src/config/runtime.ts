@@ -43,6 +43,7 @@ function localhostDefaults(): RuntimeConfig {
     },
     streams: { sceneCamera: "", inspectionCamera: "" },
     run: { dryRun: true, stepDelayMs: 700 },
+    apiToken: "",
   };
 }
 
@@ -67,7 +68,12 @@ function envDefaults(): Partial<RuntimeConfig> {
   if (ENV.VITE_SCENE_CAMERA_URL) streams.sceneCamera = ENV.VITE_SCENE_CAMERA_URL;
   if (ENV.VITE_INSPECTION_CAMERA_URL) streams.inspectionCamera = ENV.VITE_INSPECTION_CAMERA_URL;
 
-  return { services: services as RuntimeConfig["services"], streams: streams as RuntimeConfig["streams"] };
+  const patch: Partial<RuntimeConfig> = {
+    services: services as RuntimeConfig["services"],
+    streams: streams as RuntimeConfig["streams"],
+  };
+  if (ENV.VITE_API_TOKEN) patch.apiToken = ENV.VITE_API_TOKEN;
+  return patch;
 }
 
 // Deep-ish merge limited to our known shape (services / streams / run).
@@ -77,6 +83,7 @@ function merge(base: RuntimeConfig, patch?: Partial<RuntimeConfig> | null): Runt
     services: { ...base.services, ...(patch.services ?? {}) },
     streams: { ...base.streams, ...(patch.streams ?? {}) },
     run: { ...base.run, ...(patch.run ?? {}) },
+    apiToken: patch.apiToken ?? base.apiToken,
   };
 }
 
@@ -136,6 +143,10 @@ export function serviceUrl(key: ServiceKey): string {
 
 export function streamUrl(key: StreamKey): string {
   return current.streams[key];
+}
+
+export function apiToken(): string {
+  return current.apiToken;
 }
 
 export { SERVICE_KEYS, STREAM_KEYS };

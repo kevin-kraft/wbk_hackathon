@@ -8,9 +8,10 @@ tells the arm where to place the part: `ok_bin` or `reject_bin`.
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from .auth import require_token
 from .client import call_openrouter
 from .config import Settings
 from .prompts import build_messages
@@ -32,7 +33,7 @@ def health() -> DamageHealth:
     )
 
 
-@app.post("/inspect", response_model=DamageVerdict)
+@app.post("/inspect", response_model=DamageVerdict, dependencies=[Depends(require_token)])
 def inspect(req: DamageRequest) -> DamageVerdict:
     # Merge inline references with any on disk for this class.
     disk_ok, disk_damaged = load_reference(settings.reference_dir, req.part_class)

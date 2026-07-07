@@ -25,6 +25,8 @@ services:
       # Teammate-owned endpoints (external Jetson) — set to real hosts:
       - MOVEMENT_URL=${MOVEMENT_URL:-http://jetson.local:9000}
       - GRIP_URL=${GRIP_URL:-http://jetson.local:9001}
+      # Shared-token auth (empty = disabled). Same token for all our services.
+      - WBK_API_TOKEN=${WBK_API_TOKEN:-}
 
   # --- Dashboard: operator console + live demo UI (static, nginx) ---
   # config.json is mounted (not baked) so you can re-point endpoints per-machine
@@ -52,6 +54,7 @@ services:
     environment:
       - PERCEPTION_DEVICE=cuda
       - WEIGHTS_DIR=/weights
+      - WBK_API_TOKEN=${WBK_API_TOKEN:-}
     volumes:
       - ./weights:/weights
       - hf-cache:/root/.cache/huggingface
@@ -77,6 +80,7 @@ services:
       - FP_REPO=/workspace/FoundationPose
       - FP_MESH_DIR=/meshes
       - FP_CLASS_MESH=${FP_CLASS_MESH:-{}}
+      - WBK_API_TOKEN=${WBK_API_TOKEN:-}
     volumes:
       - ${FOUNDATIONPOSE_REPO:-~/code/FoundationPose}:/workspace/FoundationPose
       - ./pose/assets/meshes:/meshes
@@ -94,6 +98,7 @@ services:
     environment:
       - GIGAPOSE_REPO=/workspace/GigaPose
       - GP_DATASET=${GP_DATASET:-kip2}
+      - WBK_API_TOKEN=${WBK_API_TOKEN:-}
     volumes:
       - ${GIGAPOSE_REPO:-~/code/GigaPose}:/workspace/GigaPose
     deploy: *gpu
@@ -110,6 +115,7 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}
       - REFERENCE_DIR=/reference
+      - WBK_API_TOKEN=${WBK_API_TOKEN:-}
     volumes:
       - ./damage/reference:/reference
 

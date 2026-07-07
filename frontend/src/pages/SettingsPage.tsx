@@ -76,6 +76,19 @@ export default function SettingsPage() {
         </div>
       </Card>
 
+      <Card title="API token">
+        <p className="mb-3 text-[12px] leading-snug text-zinc-500">
+          Shared token sent to the orchestrator (Bearer header on run, <code className="font-mono">?token=</code>{" "}
+          on the live stream). Must match the services' <code className="font-mono">WBK_API_TOKEN</code>. Leave empty
+          if the services run without a token.
+        </p>
+        <Field
+          label="WBK_API_TOKEN"
+          value={cfg.apiToken}
+          onChange={(v) => setCfg((c) => ({ ...c, apiToken: v }))}
+        />
+      </Card>
+
       <Card title="Run defaults">
         <div className="flex flex-wrap items-center gap-6">
           <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-300">

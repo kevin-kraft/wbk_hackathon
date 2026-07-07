@@ -16,10 +16,11 @@ import queue
 import threading
 import time
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from .auth import require_token
 from .factory import build_orchestrator
 from .models import LoopEvent
 
@@ -46,7 +47,7 @@ def health() -> dict:
     return {"status": "ok", "service": "orchestrator"}
 
 
-@app.post("/run")
+@app.post("/run", dependencies=[Depends(require_token)])
 def run(dry_run: bool = False) -> dict:
     """Run a full loop and return all events + the final stats at once (no streaming)."""
     events: list[dict] = []
@@ -61,7 +62,7 @@ def _sse(data: dict, event: str | None = None) -> str:
     return f"{prefix}data: {json.dumps(data)}\n\n"
 
 
-@app.get("/events/run")
+@app.get("/events/run", dependencies=[Depends(require_token)])
 async def events_run(dry_run: bool = False, delay: float = 0.0) -> StreamingResponse:
     """Run a loop and stream each stage event as it happens (SSE).
 

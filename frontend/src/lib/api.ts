@@ -1,7 +1,13 @@
 // Thin fetch helpers bound to the runtime config.
 
 import type { HealthStatus, ServiceKey } from "./types";
-import { serviceUrl } from "../config/runtime";
+import { serviceUrl, apiToken } from "../config/runtime";
+
+/** Bearer header for the shared token, or {} when none is configured. */
+export function authHeaders(): Record<string, string> {
+  const t = apiToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
 
 async function withTimeout<T>(p: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
   const ctrl = new AbortController();
@@ -31,14 +37,18 @@ export async function checkHealth(key: ServiceKey, timeoutMs = 3000): Promise<He
 /** POST {orchestrator}/run — non-streaming full run (returns events + stats). */
 export async function runOnce(dryRun: boolean): Promise<{ stats: Record<string, number>; events: unknown[] }> {
   const base = serviceUrl("orchestrator");
-  const res = await fetch(`${base}/run?dry_run=${dryRun}`, { method: "POST" });
+  const res = await fetch(`${base}/run?dry_run=${dryRun}`, { method: "POST", headers: authHeaders() });
   if (!res.ok) throw new Error(`run failed: HTTP ${res.status}`);
   return res.json();
 }
 
-/** URL for the SSE streaming run endpoint. */
+/** URL for the SSE streaming run endpoint. The token rides as a query param
+ * because EventSource can't set an Authorization header. */
 export function runStreamUrl(dryRun: boolean, delaySeconds: number): string {
   const base = serviceUrl("orchestrator");
   const delay = Math.max(0, delaySeconds);
-  return `${base}/events/run?dry_run=${dryRun}&delay=${delay}`;
+  let url = `${base}/events/run?dry_run=${dryRun}&delay=${delay}`;
+  const t = apiToken();
+  if (t) url += `&token=${encodeURIComponent(t)}`;
+  return url;
 }

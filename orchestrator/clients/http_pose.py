@@ -11,7 +11,7 @@ from ..models import PartDetection, Pose, SceneFrame
 class HttpPose:
     def __init__(self, config: OrchestratorConfig) -> None:
         self.c = config
-        self._http = httpx.Client(timeout=config.http_timeout_s)
+        self._http = httpx.Client(timeout=config.http_timeout_s, headers=config.auth_headers)
 
     def estimate(self, frame: SceneFrame, part: PartDetection) -> Pose:
         if not part.mask_b64:

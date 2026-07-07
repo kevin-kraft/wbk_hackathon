@@ -56,6 +56,10 @@ class OrchestratorConfig:
     inspection_angles: int = field(default_factory=lambda: int(os.getenv("INSPECTION_ANGLES", "3")))
     http_timeout_s: float = field(default_factory=lambda: float(os.getenv("ORCH_HTTP_TIMEOUT_S", "120")))
 
+    # Shared-token auth (see auth.py). Same token the orchestrator both REQUIRES on
+    # its own /run + /events/run and SENDS to perception/pose/damage. Empty = off.
+    api_token: str = field(default_factory=lambda: os.getenv("WBK_API_TOKEN", ""))
+
     # --- hand-eye calibration + grasp geometry ---
     # base<-camera extrinsics: eye-to-hand (camera fixed to the world), so a single
     # STATIC matrix — never recomposed per frame. Supply via T_BASE_CAM as flat-16
@@ -68,3 +72,8 @@ class OrchestratorConfig:
     obj_T_grasp: list[list[float]] = field(default_factory=lambda: _load_matrix("T_OBJ_GRASP", "T_OBJ_GRASP_UNITS"))
     # Pre-grasp stand-off distance (metres) along the grasp approach axis.
     grasp_approach_dist: float = field(default_factory=lambda: float(os.getenv("ORCH_APPROACH_DIST", "0.10")))
+
+    @property
+    def auth_headers(self) -> dict[str, str]:
+        """Bearer header sent to downstream stages when a token is configured."""
+        return {"Authorization": f"Bearer {self.api_token}"} if self.api_token else {}
