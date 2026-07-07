@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy to config.json next to the compose file and point at your hosts. Edited on the target; no rebuild.",
+  "services": {
+    "orchestrator": "http://ORCH_HOST:8000",
+    "yolo": "http://GPU_SERVER:8001",
+    "sam3": "http://GPU_SERVER:8002",
+    "locateanything": "http://GPU_SERVER:8003",
+    "foundationpose": "http://GPU_SERVER:8004",
+    "gigapose": "http://GPU_SERVER:8005",
+    "damage": "http://DAMAGE_HOST:8006",
+    "movement": "http://JETSON:9000",
+    "grip": "http://JETSON:9001"
+  },
+  "streams": {
+    "sceneCamera": "http://SCENE_CAM_HOST:8080/stream.mjpg",
+    "inspectionCamera": ""
+  },
+  "run": { "dryRun": true, "stepDelayMs": 700 }
+}

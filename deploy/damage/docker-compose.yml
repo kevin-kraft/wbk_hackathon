@@ -1,0 +1,21 @@
+# Standalone deploy of the damage-inspection service. Copy this file (+ a filled
+# .env) to the target; no repo clone needed.
+#
+# Reference images: whatever is committed under damage/reference/ is baked into
+# the image at /app/damage/reference (the Dockerfile does COPY . /app/damage), so
+# no runtime mount is needed. REFERENCE_DIR below points at that baked path. To
+# swap references without rebuilding, mount a host dir over it and repoint
+# REFERENCE_DIR (uncomment the volume block).
+services:
+  damage:
+    image: ghcr.io/kevin-kraft/wbk-damage:latest
+    container_name: wbk-damage
+    ports:
+      - "8006:8006"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}
+      - REFERENCE_DIR=/app/damage/reference
+    # volumes:
+    #   - ./reference:/reference:ro   # and set REFERENCE_DIR=/reference
+    restart: unless-stopped

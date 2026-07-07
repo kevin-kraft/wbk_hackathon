@@ -1,0 +1,57 @@
+name: publish-images
+
+# Build + push the deployable CPU service images to GHCR.
+# Trigger manually (Actions tab -> Run workflow) or by pushing a v* tag.
+# Nothing is published on ordinary commits.
+#
+# GPU services (perception, pose) are intentionally NOT here — they're multi-GB
+# and are built on the GPU server (see deploy/README.md).
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: orchestrator
+            context: orchestrator
+          - name: damage
+            context: damage
+          - name: dashboard
+            context: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lowercase image prefix
+        id: prefix
+        run: echo "value=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.context }}
+          push: true
+          tags: |
+            ${{ steps.prefix.outputs.value }}/wbk-${{ matrix.name }}:latest
+            ${{ steps.prefix.outputs.value }}/wbk-${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,11 @@
+# Standalone deploy of the orchestrator. Copy this file (+ a filled .env) to the
+# target; no repo clone needed.  docker compose pull && docker compose up -d
+services:
+  orchestrator:
+    image: ghcr.io/kevin-kraft/wbk-orchestrator:latest
+    container_name: wbk-orchestrator
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped

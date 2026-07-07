@@ -1,0 +1,12 @@
+# Standalone deploy of the dashboard. Copy this file + a config.json to the
+# target; no repo clone needed. Edit config.json to point at your service hosts,
+# then `docker compose up -d` — reload the browser after any config.json change.
+services:
+  dashboard:
+    image: ghcr.io/kevin-kraft/wbk-dashboard:latest
+    container_name: wbk-dashboard
+    ports:
+      - "5173:80"
+    volumes:
+      - ./config.json:/usr/share/nginx/html/config.json:ro
+    restart: unless-stopped
