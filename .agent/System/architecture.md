@@ -1,13 +1,15 @@
 # Architecture — VLM-Guided Robotic Disassembly
 
 ## Related Docs
-- [System: Orchestrator](./orchestrator.md) — the state machine that ties every stage below together, the Protocol/client seam, loop states
-- [Integration Points & Wire Contracts](./integration_points.md) — the base64-in-JSON contracts, model-adapter pattern, HF cache mount
+- [System: Orchestrator](./orchestrator.md) — the state machine that ties every stage below together, the Protocol/client seam, loop states, the `/events/run` SSE endpoint
+- [System: Dashboard](./dashboard.md) — the operator console / live demo UI that streams from the orchestrator
+- [Integration Points & Wire Contracts](./integration_points.md) — the base64-in-JSON contracts, model-adapter pattern, HF cache mount, the SSE contract
 - [ADR: perception shared container vs. pose split containers](../Decisions/0001-perception-shared-container-pose-split-containers.md)
 - [ADR: perception model stack](../Decisions/0002-perception-model-stack.md)
 - [ADR: damage fail-safe sort policy](../Decisions/0003-damage-failsafe-sort-policy.md)
 - [ADR: pose contract reuses kip-pose-viewer](../Decisions/0004-pose-contract-reuses-kip-pose-viewer.md)
 - [ADR: mock-first, interface-seam integration](../Decisions/0005-mock-first-interface-seam-integration.md) — how the orchestrator runs the full loop today against mocks for teammate-owned pieces
+- [ADR: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why the UI isn't fused into the orchestrator
 - [SOP: running the services](../SOP/running_services.md)
 - [SOP: running the tests](../SOP/running_tests.md)
 - [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
@@ -37,23 +39,33 @@ implementation-level detail (ports, containers, code layout) on top of those.
  scene cam ─► PERCEPTION ─► 6DoF POSE ─► GRASP PLANNING ─► MOVEMENT ─► [grip sensor] ─► DAMAGE ─► bin
               (yolo/sam3/    (foundation   (naive/future)   (Jetson,     (0/1 rectify)   (OpenRouter
                locate)        pose/giga)                     external)                    VLM)   └─► loop back to PERCEPTION
+
+                                     ▲ GET /events/run (SSE, read-only)
+                                     │
+                             DASHBOARD (frontend/, :5173, separate static app)
 ```
 
 The **orchestrator** (`orchestrator/`, added `3abc923`) is the state machine
 that drives this whole loop, calling each stage through pluggable clients —
 see [System: Orchestrator](./orchestrator.md) for the loop states and the
 Protocol seam, and [ADR 0005](../Decisions/0005-mock-first-interface-seam-integration.md)
-for why it runs today against mocks for the pieces still in progress.
+for why it runs today against mocks for the pieces still in progress. The
+**dashboard** (`frontend/`) is a separate static app that only *observes* the
+loop over the orchestrator's `/events/run` SSE stream — it cannot drive the
+robot through any path the loop itself doesn't expose — see
+[System: Dashboard](./dashboard.md) and
+[ADR 0008](../Decisions/0008-frontend-separate-static-app.md).
 
 | Stage | Dir | Services (port) | Containers | Hardware | Status |
 |---|---|---|---|---|---|
-| Orchestrator | `orchestrator/` | orchestrator `:8000` | 1 | CPU | Built (mock-driven; also drives real services) |
+| Orchestrator | `orchestrator/` | orchestrator `:8000` | 1 | CPU | Built (mock-driven; also drives real services; SSE live-run endpoint) |
 | Perception | `perception/` | yolo `:8001`, sam3 `:8002`, locateanything `:8003` | 1 (supervisord) | GPU | Built |
 | 6DoF pose | `pose/` | foundationpose `:8004`, gigapose `:8005` | 2 (siblings) | GPU | Built |
 | Grasp planning | `orchestrator/clients/naive_grasp.py` | — (in-process) | — | CPU | Naive placeholder — real module not built |
 | Movement | — | Jetson endpoint (external) | — | — | Teammate-owned, in progress — [proposed contract](../../contracts/movement_api.md) |
 | Grip detection | — | pressure sensor (external) | — | — | Teammate-owned, in progress — [proposed contract](../../contracts/grip_api.md) |
 | Damage inspection | `damage/` | damage `:8006` | 1 | CPU | Built |
+| Dashboard (UI) | `frontend/` | dashboard `:5173` (nginx) | 1 | — | Built — live SSE, works today against mocks |
 
 Grasp planning now has a working (if deliberately naive) placeholder in this
 repo, and movement/grip detection now have proposed wire contracts and real
@@ -189,7 +201,11 @@ ungraspable part, bounded termination). No GPU, no model weights, no
 `OPENROUTER_API_KEY`, no network, no hardware. See
 [SOP: running the tests](../SOP/running_tests.md) for the conftest.py
 per-stage import-root subtlety and what's intentionally NOT covered
-(`*.load()`/`*.infer()`/`*.estimate()` on all five real model adapters).
+(`*.load()`/`*.infer()`/`*.estimate()` on all five real model adapters). This
+count is Python-only — `frontend/` has no test framework installed
+(`package.json` has no `vitest`/`jest`); its only current CI-equivalent gate
+is `npm run build` (`tsc -b && vite build`), i.e. type-checking + a
+production bundle, verified clean but not run in `.github/workflows/tests.yml`.
 
 CI: `.github/workflows/tests.yml` runs `uv sync --frozen && uv run pytest -q`
 on push/PR to `main`. Green as of `7cf5211` ("Add GitHub Actions CI to run

@@ -2,10 +2,12 @@
 
 ## Related Docs
 - [Architecture](./architecture.md) — full pipeline overview, per-stage service map
-- [Integration Points & Wire Contracts](./integration_points.md) — perception/pose/damage wire contracts the orchestrator's HTTP clients speak
+- [Integration Points & Wire Contracts](./integration_points.md) — perception/pose/damage wire contracts the orchestrator's HTTP clients speak, plus the `/events/run` SSE contract
+- [System: Dashboard](./dashboard.md) — the frontend app that consumes `/events/run`
 - [ADR: mock-first, interface-seam integration](../Decisions/0005-mock-first-interface-seam-integration.md) — why the loop was built against Protocols + mocks before teammate-owned hardware existed
 - [ADR: eye-to-hand static calibration + grasp chain composition](../Decisions/0006-eye-to-hand-static-calibration.md) — why `T_base_cam` is a single static matrix and how the grasp chain composes
 - [ADR: motor-current-based grip sensing](../Decisions/0007-grip-motor-current-sensing.md) — why `/grip` moved from a binary pad to analog current, and the end-stop pitfall
+- [ADR: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why the SSE endpoint below exists and why CORS is on
 - [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
 - [SOP: running the services](../SOP/running_services.md)
 - `orchestrator/README.md` (in-repo) — the module's own README; this doc adds the `.agent/` cross-reference layer on top, not a duplicate
@@ -165,6 +167,29 @@ rationale):
   `build_orchestrator()` and returns `{"stats": ..., "events": [...]}`. This
   is what `docker-compose.yml`'s `orchestrator` service runs in production
   (`dry_run=false` against the live containers + Jetson endpoints).
+- **`GET /events/run?dry_run=<bool>&delay=<seconds>`** (`orchestrator/app.py`,
+  added alongside the dashboard) — the same loop, but **streamed** as
+  Server-Sent Events instead of collected into one response: this is what the
+  [dashboard](./dashboard.md) consumes to narrate the loop live. The loop
+  runs synchronously in a daemon worker thread (`threading.Thread`, name
+  `orchestrator-run`) and pushes `LoopEvent`s through a `queue.Queue` that an
+  async generator drains via `loop.run_in_executor(None, q.get)` — this
+  bridges the loop's blocking calls (HTTP clients, `time.sleep`) into the
+  async SSE response without making `loop.py` itself async. `delay` (seconds,
+  default `0.0`) sleeps in the worker thread after each event — mocks
+  otherwise run to completion in milliseconds, too fast to watch live.
+  Frame sequence: one `start` frame, then one `event` frame per `LoopEvent`,
+  then either a `summary` frame (final stats) or an `error` frame (run
+  raised — surfaced to the UI instead of a silent hang/timeout), then always
+  a terminal `end` frame that closes the stream. See
+  [Integration Points](./integration_points.md) for the exact SSE format.
+  `POST /run` is unchanged and still exists as the non-streaming variant (a
+  scripted smoke test, e.g., doesn't need SSE parsing).
+- **CORS**: `app.py` adds `CORSMiddleware` with `allow_origins=["*"]`,
+  `allow_credentials=False` — required because the dashboard is a separate
+  origin (see [ADR 0008](../Decisions/0008-frontend-separate-static-app.md)).
+  Judged acceptable for a trusted-LAN demo control plane; tighten to the
+  known dashboard origin(s) before any wider exposure.
 
 ## Data model (`orchestrator/models.py`)
 

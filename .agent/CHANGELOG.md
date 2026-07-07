@@ -2,6 +2,37 @@
 
 Newest first.
 
+- 2026-07-07 — Dashboard (`frontend/`) and the orchestrator's SSE live-run
+  endpoint documented (uncommitted working-tree changes as of this doc
+  update: new `frontend/` tree, modified `orchestrator/app.py`,
+  `docker-compose.yml`, root `README.md`). Added `System/dashboard.md`
+  (React 19 + Vite 6 + TS + Tailwind v4 static SPA; the four pages; the
+  four-layer runtime endpoint config `localStorage > config.json > VITE_* >
+  localhost` in `frontend/src/config/runtime.ts`; `useRunStream`'s SSE
+  consumption and the must-close-on-`end` gotcha; deployment via
+  `frontend/Dockerfile` + nginx + the `dashboard` compose service; no test
+  framework installed, `npm run build` is the only current gate and it is
+  not in CI). Added `Decisions/0008-frontend-separate-static-app.md` (ADR:
+  the dashboard is a separate static app, not served by the orchestrator —
+  headless/CI-testable control plane vs. re-pointable-per-host browser app;
+  the only coupling is the read-only `GET /events/run` SSE stream; CORS
+  consequence). Extended `System/orchestrator.md` ("Entry points"): new
+  `GET /events/run?dry_run=<bool>&delay=<seconds>` SSE endpoint (worker
+  thread + `queue.Queue` bridging into an async generator, frame sequence,
+  `delay` pacing) and the new permissive CORS middleware, both cross-linked
+  to ADR 0008. Extended `System/integration_points.md`: new "Contract 4 —
+  Orchestrator live loop `GET /events/run` (SSE)" section (full frame-type
+  table, the close-on-`end` consumer contract, the CORS note). Updated
+  `System/architecture.md`: pipeline diagram gained the dashboard as a
+  read-only SSE observer, stage table gained a `Dashboard (UI)` row
+  (`frontend/`, `:5173`, nginx), and the Test suite section now notes the
+  86-pytest count is Python-only (`frontend/` has no test framework; `npm
+  run build` is clean but not wired into `.github/workflows/tests.yml`).
+  Updated `README.md`'s `System/integration_points.md` and
+  `System/orchestrator.md` lines, added the `System/dashboard.md` and
+  `Decisions/0008` lines. (Root-level `README.md`/`docker-compose.yml`
+  changes were made by the calling task directly and are not duplicated
+  here — see repo-root `README.md`.)
 - 2026-07-07 — Movement/grip REST approach confirmed by hardware teammate:
   the Jetson-side interface will be an HTTP-adapter microservice wrapping
   NeuraPy (NEURA's Python SDK), to be uploaded to the repo shortly. This

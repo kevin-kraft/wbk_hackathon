@@ -2,8 +2,10 @@
 
 ## Related Docs
 - [Architecture](./architecture.md) — pipeline overview and per-stage service map
-- [System: Orchestrator](./orchestrator.md) — the orchestrator's `HttpPerception`/`HttpPose`/`HttpDamage` clients are consumers of the three contracts below
+- [System: Orchestrator](./orchestrator.md) — the orchestrator's `HttpPerception`/`HttpPose`/`HttpDamage` clients are consumers of the three contracts below; also owns the `/events/run` SSE producer described here
+- [System: Dashboard](./dashboard.md) — the SSE contract's consumer (`useRunStream`)
 - [ADR: pose contract reuses kip-pose-viewer](../Decisions/0004-pose-contract-reuses-kip-pose-viewer.md)
+- [ADR: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why SSE + CORS exist at all
 - [SOP: running the services](../SOP/running_services.md)
 
 This doc covers the things a change to *any* stage is likely to touch: the
@@ -107,6 +109,47 @@ and why it lives there instead of trusting the model's own bin choice.
 
 `GET /health` → `DamageHealth{status, service, model, api_key_present,
 reference_dir}`.
+
+## Contract 4 — Orchestrator live loop `GET /events/run` (SSE)
+
+Defined in `orchestrator/app.py`. This is the one contract in the repo that
+isn't request/response — it's a **Server-Sent Events** stream, added so the
+[dashboard](./dashboard.md) can narrate a run live instead of waiting for
+`POST /run` to finish and return one batch. See
+[ADR 0008](../Decisions/0008-frontend-separate-static-app.md) for why this
+exists as a separate app's needs rather than folded into `POST /run`.
+
+Request: `GET /events/run?dry_run=<bool>&delay=<seconds>` — `dry_run`
+(default `false`) picks mocks vs. real clients exactly like `POST /run`;
+`delay` (default `0.0`) sleeps that many seconds after each emitted event, in
+the server-side worker thread, to pace the stream for a watchable demo
+(mocks otherwise finish in milliseconds).
+
+Response: `Content-Type: text/event-stream`, `Cache-Control: no-cache`,
+`Connection: keep-alive`, `X-Accel-Buffering: no` (disables proxy buffering
+so events aren't batched). Frame sequence, one `event: <name>\ndata:
+<json>\n\n` block per frame:
+
+| `event:` name | When | `data:` payload |
+|---|---|---|
+| `start` | once, immediately | `{"status": "started", "dry_run": bool}` |
+| `event` | once per `LoopEvent` the loop emits | `{"step", "state", "message", "data"}` — same shape as `POST /run`'s `events[]` entries; `state` is one of `LOCATE, POSE, GRIP, REGRASP, SKIP, REMOVE, RECHECK, SORT, BLOCKED, DONE, SUMMARY` (see [System: Orchestrator](./orchestrator.md)) |
+| `summary` | once, run completed normally | the `stats` dict (`removed`, `ok_bin`, `reject_bin`, `skipped`, ...) |
+| `error` | once, only if the run raised | `{"error": "<str(exc)>"}` — a **named** SSE event, distinct from a transport-level connection drop |
+| `end` | always, last frame | `{"status": "done"}` — closes the stream |
+
+Consumer contract: a client **must** close its `EventSource` on `end` (or on
+the named `error` event). `EventSource` auto-reconnects by default, and every
+new connection to `GET /events/run` **starts a new loop run** — not closing
+on `end` would silently trigger a second run. The dashboard's
+`useRunStream.ts` does this; see [System: Dashboard](./dashboard.md).
+
+**CORS**: `app.py` registers `CORSMiddleware` with `allow_origins=["*"]`,
+`allow_credentials=False`, all methods/headers allowed — needed because the
+dashboard is served from a different origin than the orchestrator (see
+[ADR 0008](../Decisions/0008-frontend-separate-static-app.md)). This applies
+to the whole orchestrator app, not just `/events/run` — `POST /run` and `GET
+/health` are cross-origin-callable too.
 
 ## The model-adapter pattern (perception)
 
