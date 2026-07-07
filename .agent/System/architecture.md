@@ -202,13 +202,18 @@ ungraspable part, bounded termination). No GPU, no model weights, no
 [SOP: running the tests](../SOP/running_tests.md) for the conftest.py
 per-stage import-root subtlety and what's intentionally NOT covered
 (`*.load()`/`*.infer()`/`*.estimate()` on all five real model adapters). This
-count is Python-only — `frontend/` has no test framework installed
-(`package.json` has no `vitest`/`jest`); its only current CI-equivalent gate
-is `npm run build` (`tsc -b && vite build`), i.e. type-checking + a
-production bundle, verified clean but not run in `.github/workflows/tests.yml`.
+count is Python-only. `frontend/` has its own **Vitest** unit suite — 23
+tests across 3 files (`npm test` → `vitest run`, jsdom env,
+`frontend/vitest.config.ts`), covering `config/runtime.ts`'s endpoint
+precedence resolution, `lib/stages.ts`'s state→stage mapping, and the
+event-reducer logic in `lib/derive.ts` (`tallyBins`, `deriveInspections`,
+`deriveGrip`, `currentPart`) — see [System: Dashboard](./dashboard.md) for
+detail. `npm run build` (`tsc -b && vite build`) remains the type-check +
+production-bundle gate on top of that.
 
-CI: `.github/workflows/tests.yml` runs `uv sync --frozen && uv run pytest -q`
-on push/PR to `main`. Green as of `7cf5211` ("Add GitHub Actions CI to run
-tests on push/PR to main") — 86-test collection locally confirmed as of
-`3abc923` ("Add orchestrator..."), but CI run status for that commit was not
-re-checked as part of this doc update.
+CI: `.github/workflows/tests.yml` has two jobs. `pytest` runs `uv sync
+--frozen && uv run pytest -q` (86 tests). `frontend` runs `npm ci`, then
+`npm test` (the 23-test Vitest suite), then `npm run build` — so unit tests,
+type-check, and build all gate every push/PR to `main`. Green as of
+`7cf5211` ("Add GitHub Actions CI to run tests on push/PR to main"),
+extended to cover the frontend suite once Vitest landed.

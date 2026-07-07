@@ -2,6 +2,24 @@
 
 Newest first.
 
+- 2026-07-07 — Correction: frontend now has a test suite. A Vitest unit
+  suite landed in `frontend/` (`npm test` → `vitest run`, jsdom env,
+  `frontend/vitest.config.ts`, `src/**/*.test.ts` — 23 tests across 3 files,
+  all passing), and the event-reducer logic was extracted from components
+  into pure functions in `frontend/src/lib/derive.ts` (`tallyBins`,
+  `deriveInspections`, `deriveGrip`, `currentPart`) specifically to make it
+  testable without rendering; `BinTally`/`GripTelemetry`/`InspectionPage`/
+  `DashboardPage` now consume those. `.github/workflows/tests.yml`'s
+  `frontend` job now runs `npm test` before `npm run build`, so unit tests +
+  type-check + build all gate every push/PR (the `pytest` job is unchanged
+  at 86 tests). Updated `System/architecture.md`'s "Test suite" section
+  (previously said the frontend had no test framework and wasn't in CI —
+  both now false) and `System/dashboard.md` (previously said "no test
+  framework installed"; replaced with a new "Test suite" section detailing
+  the Vitest setup, what each of the 3 test files covers, and the
+  `lib/derive.ts` pure-reducer extraction). No README index changes needed —
+  the existing one-liners for those two docs were generic and didn't assert
+  the missing-test-framework state.
 - 2026-07-07 — Dashboard (`frontend/`) and the orchestrator's SSE live-run
   endpoint documented (uncommitted working-tree changes as of this doc
   update: new `frontend/` tree, modified `orchestrator/app.py`,

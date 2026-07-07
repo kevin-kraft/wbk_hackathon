@@ -25,6 +25,9 @@ belt-and-braces on top of that, not the primary mechanism).
 `npm run build` runs `tsc -b && vite build` (type-check + bundle to `dist/`)
 and is verified clean.
 
+`npm test` runs a **Vitest** unit suite (23 tests, jsdom env,
+`frontend/vitest.config.ts`, `src/**/*.test.ts`) — see "Test suite" below.
+
 ## The four pages (`frontend/src/pages/`)
 
 | Page | File | What it shows |
@@ -120,6 +123,29 @@ UI-facing stages: `GRIP`/`REGRASP`/`SKIP` → `GRASP`; `REMOVE`/`RECHECK` →
 attention-worthy). `frontend/src/lib/types.ts` mirrors
 `orchestrator/models.py`'s `LoopEvent`/stats shapes on the TypeScript side —
 keep these two in sync if the Python dataclasses change shape.
+
+## Test suite (`frontend/src/lib/derive.ts` + Vitest)
+
+The event-reducer logic that used to live inline in components was pulled
+out into pure functions in `frontend/src/lib/derive.ts` specifically to make
+it unit-testable without rendering:
+
+- `tallyBins(events, stats)` → bin counts, consumed by `BinTally`.
+- `deriveInspections(events)` → per-part OK/damaged verdicts, consumed by
+  `InspectionPage`.
+- `deriveGrip(events)` → `{ attempts, confirmed, retrying }`, consumed by
+  `GripTelemetry`.
+- `currentPart(events)` → the active part/step derived from the latest
+  `LOCATE` event, consumed by `DashboardPage`.
+
+`npm test` (`vitest run`, jsdom env) runs 23 tests across 3 files:
+`src/lib/derive.test.ts` (12, the reducers above), `src/config/runtime.test.ts`
+(6, the four-layer endpoint-precedence resolution described above —
+localStorage > config.json > env > localhost, trailing-slash stripping,
+fetch-failure fallback), and `src/lib/stages.test.ts` (5, the
+`stateToStage` mapping described below). All passing; wired into CI as
+`npm test` ahead of `npm run build` in the `frontend` job of
+`.github/workflows/tests.yml` — see [System: Architecture](./architecture.md#test-suite).
 
 ## Deployment
 
