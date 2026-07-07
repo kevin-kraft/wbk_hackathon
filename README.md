@@ -124,6 +124,7 @@ perception/   YOLO + SAM3 + LocateAnything   (1 GPU container)
 pose/         FoundationPose + GigaPose       (2 GPU containers)
 damage/       OpenRouter VLM damage inspection (CPU)
 frontend/     operator console + live demo dashboard (React/Vite static app)
+deploy/       per-service standalone compose files for single-service deploys (GHCR) — see deploy/README.md
 contracts/    proposed Jetson-movement + grip-sensor APIs (hand-off to teammates)
 docs/         architecture.md
 docker-compose.yml

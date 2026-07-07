@@ -32,6 +32,19 @@ curl -s localhost:8001/infer -H 'content-type: application/json' \
 Requires the **NVIDIA Container Toolkit** on the host. To run CPU-only (e.g. on a
 laptop, for the mock/dev path), set `PERCEPTION_DEVICE=cpu`.
 
+### Newer GPUs (Blackwell / sm_120)
+
+The default base image (`pytorch/pytorch:2.5.1-cuda12.4`) predates Blackwell and
+**won't run** on RTX PRO 6000 / RTX 50-series GPUs. Build against a CUDA 12.8 /
+torch 2.8 base via the `BASE_IMAGE` build-arg:
+
+```bash
+docker build --build-arg BASE_IMAGE=pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel \
+  -t wbk-perception:blackwell perception/
+```
+
+`requirements.txt` deliberately omits torch, so the base image's torch is used as-is.
+
 ## Local dev (without Docker)
 
 ```bash
@@ -86,3 +99,22 @@ Each service is intentionally self-contained (own `model.py`, `main.py`,
 
 Both caches live in `~/.cache/huggingface`, which `docker-compose.yml` mounts
 into the container.
+
+## Deploying to a remote GPU server
+
+For a server without HF auth (and to skip re-downloading gated SAM 3), `rsync` the
+local model dirs into a server-side cache and mount it, instead of downloading:
+
+```bash
+rsync -a ~/.cache/huggingface/hub/models--facebook--sam3 \
+        ~/.cache/huggingface/hub/models--nvidia--LocateAnything-3B \
+        <server>:hf-cache/hub/
+docker run -d --gpus '"device=1"' \
+  -p 127.0.0.1:6767:8001 -p 127.0.0.1:6768:8002 -p 127.0.0.1:6769:8003 \
+  -v ~/hf-cache:/root/.cache/huggingface -e WBK_API_TOKEN=... wbk-perception:blackwell
+```
+
+Bind to `127.0.0.1` and reach it from elsewhere over an SSH tunnel
+(`ssh -L 8001:localhost:6767 …`) rather than exposing the ports. On a shared
+server (single account / shared Docker daemon) there is no real isolation from
+other tenants — keep secrets (e.g. the OpenRouter key) off the box.
