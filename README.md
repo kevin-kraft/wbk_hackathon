@@ -22,18 +22,36 @@ Pipeline of containerized microservices (FastAPI, base64-in-JSON contracts). Ful
 detail in [`docs/architecture.md`](docs/architecture.md).
 
 ```
- scene cam ─► PERCEPTION ─► 6DoF POSE ─► GRASP PLANNING ─► MOVEMENT ─► DAMAGE ─► bin
-              (yolo/sam3/    (foundation   (future)         (future)     (OpenRouter
-               locate)        pose/giga)                                  VLM)   └─► loop
+             ┌──────────────────────  ORCHESTRATOR  (state machine, :8000) ─────────────────────┐
+             ▼                                                                                   │
+ scene cam ─► PERCEPTION ─► 6DoF POSE ─► GRASP PLANNING ─► MOVEMENT ─► [grip sensor] ─► DAMAGE ─► bin
+              (yolo/sam3/    (foundation   (naive/future)   (Jetson)    (0/1 rectify)   (OpenRouter
+               locate)        pose/giga)                                                  VLM)   └─► loop
 ```
+
+The **orchestrator** drives the loop, calling each stage through pluggable
+clients — so it runs today against mocks for the pieces still in progress (YOLO,
+the Jetson movement endpoint, the grip sensor).
 
 | Stage | Dir | Services (port) | Hardware | Status |
 |---|---|---|---|---|
+| **Orchestrator** | `orchestrator/` | orchestrator `8000` | CPU | ✅ built (mock-driven) |
 | **Perception** | `perception/` | yolo `8001`, sam3 `8002`, locateanything `8003` | GPU (1 container) | ✅ scaffolded |
 | **6DoF pose** | `pose/` | foundationpose `8004`, gigapose `8005` | GPU (2 containers) | ✅ scaffolded |
-| **Grasp planning** | — | — | — | ⏳ future |
-| **Movement** | — | — | — | ⏳ future |
+| **Grasp planning** | `orchestrator/` | naive placeholder | CPU | 🟡 stand-in |
+| **Movement (arm)** | — | Jetson endpoint (teammate) | — | 🔧 in progress · [contract](contracts/movement_api.md) |
+| **Grip detection** | — | pressure sensor (teammate) | — | 🔧 in progress · [contract](contracts/grip_api.md) |
 | **Damage inspection** | `damage/` | damage `8006` | CPU | ✅ scaffolded |
+
+### Orchestrator (`orchestrator/`)
+The disassembly state machine that ties every stage together: locate next part →
+pose → grasp plan → move (Jetson) → **verify grip via the 0/1 sensor, rectifying
+failed grabs** → remove → inspect → sort. It depends only on client *interfaces*,
+so it runs end-to-end **today against mocks** for the in-progress pieces. Try it:
+
+```bash
+python -m orchestrator.dry_run   # full loop, all hardware mocked
+```
 
 ### Perception (`perception/`)
 Three independent FastAPI apps in one CUDA container (supervisord):
@@ -71,24 +89,39 @@ OPENROUTER_API_KEY=sk-or-... docker compose up --build damage
 
 Each service exposes `GET /health`, `GET /docs` (OpenAPI), and its `POST` route.
 
+## Future (from the task spec — noted, not yet built)
+
+- **VLM next-part selection** — pick the next part to disassemble from a **part
+  description or a prompt**; slots in as an alternative `PerceptionClient.next_part`
+  backend (see `orchestrator/`).
+- **VLM grip verification** — a visual check that the grip is correct, running
+  **alongside** the binary pressure sensor (catches wrong-part / partial grips the
+  0/1 signal can't distinguish).
+- Real **grasp-planning** module (replacing the naive placeholder) and the
+  **movement** + **grip-sensor** endpoints (teammates; contracts in `contracts/`).
+
 ## Repo layout
 
 ```
+orchestrator/ disassembly state machine + stage clients (CPU coordinator)
 perception/   YOLO + SAM3 + LocateAnything   (1 GPU container)
 pose/         FoundationPose + GigaPose       (2 GPU containers)
 damage/       OpenRouter VLM damage inspection (CPU)
+contracts/    proposed Jetson-movement + grip-sensor APIs (hand-off to teammates)
 docs/         architecture.md
 docker-compose.yml
 ```
 
-Per-stage detail: [`perception/README.md`](perception/README.md) ·
-[`pose/README.md`](pose/README.md) · [`damage/README.md`](damage/README.md).
+Per-stage detail: [`orchestrator/README.md`](orchestrator/README.md) ·
+[`perception/README.md`](perception/README.md) · [`pose/README.md`](pose/README.md) ·
+[`damage/README.md`](damage/README.md).
 
 ## Tests
 
-Fast, GPU/network-free unit tests for the pure logic across all three modules
-(schemas, image codecs, the LocateAnything token parser, damage bin policy,
-FastAPI route wiring with model adapters mocked). See [`tests/README.md`](tests/README.md).
+Fast, GPU/network-free unit tests for the pure logic across all modules
+(perception/pose/damage schemas + codecs, the LocateAnything token parser, damage
+bin policy, and the full orchestrator loop run end-to-end on mocks). See
+[`tests/README.md`](tests/README.md).
 
 ```bash
 uv sync            # installs the light test-only deps (pytest, pillow, numpy, ...)

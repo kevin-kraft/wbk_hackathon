@@ -42,8 +42,20 @@ sits, checks the arm *did* it, and finally judges whether each removed part is
                                       └──► loop: back to PERCEPTION for next part
 ```
 
-**Built now:** perception, 6DoF pose, damage inspection.
-**Future (specified as the hackathon progresses):** grasp planning, movement.
+An **orchestrator** (state machine, `orchestrator/`, :8000) drives this whole
+loop, calling each stage through pluggable clients — so it runs today against
+mocks for the pieces still in progress (YOLO detection, the Jetson **movement**
+endpoint, the binary **grip sensor**). It owns the "rectify grabbing mistakes"
+logic: the 0/1 grip sensor gates progress and a failed read re-plans and retries.
+
+**Built now:** orchestrator (mock-driven), perception, 6DoF pose, damage inspection.
+**In progress (teammates):** YOLO detection, Jetson movement endpoint, grip
+sensor — proposed contracts in [`../contracts/`](../contracts/).
+**Future:** a real grasp-planning module (naive placeholder for now), plus two
+VLM roles the task calls for — **VLM next-part selection** (from a part
+description/prompt; an alternative perception `next_part` backend) and **VLM grip
+verification** (a visual check alongside the binary sensor). Neither implemented
+yet; seams are noted in `orchestrator/README.md`.
 
 ## The three product jobs → which stages serve them
 

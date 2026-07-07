@@ -1,0 +1,7 @@
+# Orchestrator — CPU coordinator. Light deps; the loop logic + mocks need none of
+# these (only the real HTTP clients / cameras / grasp planner do).
+fastapi>=0.115
+uvicorn[standard]>=0.30
+httpx>=0.27
+numpy>=1.26
+opencv-python-headless>=4.9
