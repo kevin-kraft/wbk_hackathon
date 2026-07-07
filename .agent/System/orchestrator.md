@@ -9,6 +9,8 @@
 - [ADR: motor-current-based grip sensing](../Decisions/0007-grip-motor-current-sensing.md) — why `/grip` moved from a binary pad to analog current, and the end-stop pitfall
 - [ADR: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why the SSE endpoint below exists and why CORS is on
 - [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — why `/run`/`/events/run` are gated and why the orchestrator also attaches the token downstream
+- [System: Robot Control](./robot_control.md) — the movement service that landed, and its actual (different) API
+- [ADR: robot_control integration](../Decisions/0010-robot-control-integration.md) — why `HttpMovement` still can't drive it yet
 - [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
 - [SOP: running the services](../SOP/running_services.md)
 - `orchestrator/README.md` (in-repo) — the module's own README; this doc adds the `.agent/` cross-reference layer on top, not a duplicate
@@ -235,10 +237,17 @@ imports with no heavy deps and `dry_run.py`/tests run anywhere without
 
 ## Teammate-owned contracts (`contracts/`)
 
-Two endpoints are **not built in this repo** — they're owned by teammates
-working on the Jetson arm and the grip hardware. The orchestrator's real
-HTTP clients (`HttpMovement`, `HttpGrip`) were written *against proposed
-contracts* so integration doesn't block on the hardware landing first:
+Two endpoints were drafted for hardware this repo doesn't own — the Jetson
+arm and the grip sensor. The orchestrator's real HTTP clients
+(`HttpMovement`, `HttpGrip`) were written *against proposed contracts* so
+integration didn't block on the hardware landing first. **Movement has since
+landed as a real, in-repo service** (`robot_control/`, Group 2 — see
+[System: Robot Control](./robot_control.md) and
+[ADR 0010](../Decisions/0010-robot-control-integration.md)), but its actual
+API is richer/different from the draft below, and `HttpMovement` has **not**
+been adapted to it yet — treat the movement contract text below as the
+target `HttpMovement` still speaks, not what the real service exposes. Grip
+remains fully external:
 
 - [`contracts/movement_api.md`](../../contracts/movement_api.md) — `POST
   /move_to_pose` (4x4 base-frame pose), `POST /move_named` (named poses:
@@ -257,21 +266,29 @@ contracts* so integration doesn't block on the hardware landing first:
   end-stop false-positive pitfall the contract designs around. Default
   `GRIP_URL=http://jetson.local:9001`.
 
-**REST approach confirmed (2026-07-07).** A hardware teammate confirmed the
-robot-arm movement/grip control interface will be an **HTTP-adapter
-microservice that wraps NeuraPy** (NEURA's Python SDK), to be uploaded to
+**REST approach confirmed, and the movement adapter has now landed
+(2026-07-07).** A hardware teammate confirmed the robot-arm movement/grip
+control interface would be an HTTP-adapter microservice, to be uploaded to
 this repo shortly. This had been in doubt: an earlier inspection of the
-Jetson controller found it running NeuraPy with no REST API of its own —
-only a read-only joint-state TCP publisher on `:5005` and a localhost MJPEG
-stream — which cast doubt on whether `HttpMovement`/`HttpGrip`'s REST
-contracts were the right shape. That doubt is now resolved: the existing
-`orchestrator/clients/http_movement.py`/`http_grip.py` clients and
-`contracts/movement_api.md`/`contracts/grip_api.md` stay the integration
-target and will be aligned to the adapter microservice's actual routes once
-it lands.
+Jetson controller found it running NeuraPy (NEURA's Python SDK) with no REST
+API of its own — only a read-only joint-state TCP publisher on `:5005` and a
+localhost MJPEG stream — which cast doubt on whether `HttpMovement`/`HttpGrip`'s
+REST contracts were the right shape. That doubt is resolved and the
+microservice has arrived as **`robot_control/`** (Group 2's Jetson bridge,
+merged commit `604733a`) — see [System: Robot Control](./robot_control.md).
+It is an HTTP FastAPI service, as expected, but it talks to the arm over a
+raw **TCP socket** to a separate LARA5/NEURA robot socket server (not itself
+in this repo), and exposes a richer, differently-shaped API
+(`/robot/hover/plan`, `/robot/hover/execute`, `/robot/execute/`, `/robot/raw`,
+calibration endpoints) than the flat `move_to_pose`/`move_named`/`gripper`
+shape `contracts/movement_api.md` drafted. `HttpMovement` has **not** been
+aligned to it yet — see [ADR 0010](../Decisions/0010-robot-control-integration.md)
+"Open gap" for exactly what's blocking that (pose-vector/frame convention
+confirmation from the robot team) and what the adapter work will involve.
+The grip endpoint (`contracts/grip_api.md`) remains fully unimplemented.
 
-Both are drafts — the note in each file is explicit that the hardware
-teammate should adjust freely and the client will follow. **Grasp planning**
+Both contract files are drafts — the note in each file is explicit that the
+hardware teammate should adjust freely and the client will follow. **Grasp planning**
 itself (`NaiveTopDownGrasp`) is also explicitly a placeholder, not a
 teammate-owned contract — same file, `orchestrator/clients/naive_grasp.py` —
 top-down grasp at the object origin with a fixed stand-off, no gripper

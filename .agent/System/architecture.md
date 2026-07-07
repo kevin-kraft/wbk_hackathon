@@ -3,6 +3,7 @@
 ## Related Docs
 - [System: Orchestrator](./orchestrator.md) — the state machine that ties every stage below together, the Protocol/client seam, loop states, the `/events/run` SSE endpoint
 - [System: Dashboard](./dashboard.md) — the operator console / live demo UI that streams from the orchestrator
+- [System: Robot Control](./robot_control.md) — the movement stage: Group 2's Jetson bridge to the LARA5 robot
 - [Integration Points & Wire Contracts](./integration_points.md) — the base64-in-JSON contracts, model-adapter pattern, HF cache mount, the SSE contract
 - [ADR: perception shared container vs. pose split containers](../Decisions/0001-perception-shared-container-pose-split-containers.md)
 - [ADR: perception model stack](../Decisions/0002-perception-model-stack.md)
@@ -11,6 +12,7 @@
 - [ADR: mock-first, interface-seam integration](../Decisions/0005-mock-first-interface-seam-integration.md) — how the orchestrator runs the full loop today against mocks for teammate-owned pieces
 - [ADR: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why the UI isn't fused into the orchestrator
 - [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — the optional `WBK_API_TOKEN` gate on every work endpoint
+- [ADR: robot_control integration](../Decisions/0010-robot-control-integration.md) — merging in Group 2's Jetson bridge as the movement stage, and the still-open orchestrator adapter gap
 - [SOP: running the services](../SOP/running_services.md)
 - [SOP: running the tests](../SOP/running_tests.md)
 - [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
@@ -39,8 +41,9 @@ implementation-level detail (ports, containers, code layout) on top of those.
               ┌────────────────  ORCHESTRATOR  (state machine, :8000) ────────────────┐
               ▼                                                                       │
  scene cam ─► PERCEPTION ─► 6DoF POSE ─► GRASP PLANNING ─► MOVEMENT ─► [grip sensor] ─► DAMAGE ─► bin
-              (yolo/sam3/    (foundation   (naive/future)   (Jetson,     (0/1 rectify)   (OpenRouter
-               locate)        pose/giga)                     external)                    VLM)   └─► loop back to PERCEPTION
+              (yolo/sam3/    (foundation   (naive/future)   (robot_control   (0/1 rectify,    (OpenRouter
+               locate)        pose/giga)                     :9000, built,    external)         VLM)   └─► loop back to PERCEPTION
+                                                              adapter TODO)
 
                                      ▲ GET /events/run (SSE, read-only)
                                      │
@@ -64,7 +67,7 @@ robot through any path the loop itself doesn't expose — see
 | Perception | `perception/` | yolo `:8001`, sam3 `:8002`, locateanything `:8003` | 1 (supervisord) | GPU | Built |
 | 6DoF pose | `pose/` | foundationpose `:8004`, gigapose `:8005` | 2 (siblings) | GPU | Built |
 | Grasp planning | `orchestrator/clients/naive_grasp.py` | — (in-process) | — | CPU | Naive placeholder — real module not built |
-| Movement | — | Jetson endpoint (external) | — | — | Teammate-owned, in progress — [proposed contract](../../contracts/movement_api.md) |
+| Movement | `robot_control/` | robot_control `:9000` (Jetson) | 1 | CPU (drives LARA5 arm) | Service built + deployed (Group 2) — [System doc](./robot_control.md), [ADR 0010](../Decisions/0010-robot-control-integration.md) — orchestrator adapter to its real API **not yet written** |
 | Grip detection | — | pressure sensor (external) | — | — | Teammate-owned, in progress — [proposed contract](../../contracts/grip_api.md) |
 | Damage inspection | `damage/` | damage `:8006` | 1 | CPU | Built |
 | Dashboard (UI) | `frontend/` | dashboard `:5173` (nginx) | 1 | — | Built — live SSE, works today against mocks |
@@ -72,8 +75,15 @@ robot through any path the loop itself doesn't expose — see
 Grasp planning now has a working (if deliberately naive) placeholder in this
 repo, and movement/grip detection now have proposed wire contracts and real
 HTTP clients (`orchestrator/clients/http_movement.py`,
-`orchestrator/clients/http_grip.py`) written against them — but the arm and
-sensor endpoints themselves are external, teammate-owned, and not yet online.
+`orchestrator/clients/http_grip.py`) written against them. **Movement has
+since landed as an actual service** — `robot_control/` (Group 2's Jetson
+bridge, see [System: Robot Control](./robot_control.md)) is built, deployed
+in both `docker-compose.yml` and `deploy/robot-control/`, and reachable — but
+its real API (`/robot/hover/*`, `/robot/execute/`, `/robot/raw`) doesn't
+match the draft `contracts/movement_api.md` shape `HttpMovement` calls, so
+the orchestrator **still cannot drive it** until that adapter is written
+(see [ADR 0010](../Decisions/0010-robot-control-integration.md)). The grip
+sensor endpoint is still fully external/teammate-owned and not yet online.
 See [System: Orchestrator](./orchestrator.md) "Teammate-owned contracts" and
 "Two future VLM roles" for exactly what is and isn't built.
 
@@ -184,12 +194,19 @@ As of the orchestrator addition (`3abc923`, 2026-07-07):
 - **Real grasp planning** — `NaiveTopDownGrasp` (`orchestrator/clients/naive_grasp.py`)
   is a placeholder (top-down at the object origin, fixed stand-off, no
   gripper geometry). No real planning module exists yet.
-- **Movement (Jetson arm) and grip-sensor hardware** — both are external,
-  teammate-owned. This repo now has real HTTP clients
-  (`orchestrator/clients/http_movement.py`, `http_grip.py`) and proposed
-  contracts (`contracts/movement_api.md`, `contracts/grip_api.md`) for them,
-  but the endpoints themselves are not yet online — do not assume they are
-  reachable.
+- **Movement adapter** — the arm itself is no longer purely external: `robot_control/`
+  (Group 2's Jetson bridge) is now a real, deployed service in this repo —
+  see [System: Robot Control](./robot_control.md). But its API
+  (`/robot/hover/*`, `/robot/execute/`) doesn't match the draft
+  `contracts/movement_api.md` shape the orchestrator's `HttpMovement` client
+  (`orchestrator/clients/http_movement.py`) calls, and the pose-vector/frame
+  conventions needed to bridge them are unconfirmed — see
+  [ADR 0010](../Decisions/0010-robot-control-integration.md) "Open gap". Do
+  not assume the orchestrator can drive the real arm yet.
+- **Grip-sensor hardware** — still fully external, teammate-owned. This repo
+  has a real HTTP client (`orchestrator/clients/http_grip.py`) and a
+  proposed contract (`contracts/grip_api.md`) for it, but the endpoint
+  itself is not yet online — do not assume it is reachable.
 - **YOLO detection tuning** for the specific disassembly-part vocabulary is
   still moving; the orchestrator runs against mocks for `next_part` in the
   interim (see [System: Orchestrator](./orchestrator.md)).

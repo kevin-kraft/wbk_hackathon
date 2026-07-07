@@ -2,6 +2,50 @@
 
 Newest first.
 
+- 2026-07-07 — `robot_control/` (Group 2's Jetson movement bridge) documented
+  as the repo's **movement** stage (commits `604733a` "Merge robot_control
+  service from robot_control branch (Group 2)", `361fe9a` "Wire robot_control
+  into the containerized microservices architecture", `4e5213d` "docs:
+  document robot_control (movement) service in README + deploy guide"). Added
+  `System/robot_control.md`: the TCP-socket bridge to the LARA5/NEURA robot
+  socket server (`ROBOT_HOST:ROBOT_PORT`, default `127.0.0.1:65432`,
+  JSON `{function,args,kwargs}` protocol via `robot_socket_client`); the four
+  routers (`commands`, `robot_commands` with its `READ_COMMANDS`/`MOTION_COMMANDS`
+  allow-list, `robot_workflows`, `joint_states`); hover planning's five
+  lettered safety gates (A confidence, B/D workspace box, C calibration
+  residuals, F max TCP jump) and the `confirmation=="yes"` exact-match gate
+  on `/robot/hover/execute`; the Umeyama-rigid world↔base calibration solve
+  and its `session.json`/`base_world.json` artifacts (a separate calibration
+  from the orchestrator's own eye-to-hand `T_base_cam`, ADR 0006); the full
+  `app/env.py` config table; deployment (Dockerfile pinned to port `9000` to
+  match `MOVEMENT_URL`, dev compose entry, standalone `deploy/robot-control/`
+  with `network_mode: host` to run **on** the Jetson, the GHCR publish-images
+  CI matrix entry). Added `Decisions/0010-robot-control-integration.md` (ADR:
+  why only `robot_control/` was cherry-picked from the external branch; the
+  vendored `RobotCommand` in `app/schemas.py` replacing the out-of-repo
+  `shared.jetson` import and why that was preferred over pulling in more
+  branch content; why the container is pinned to port `9000` instead of the
+  code's own `8000` default; adding `app/auth.py` as a fifth copy of the
+  ADR-0009 shared-token pattern, since the merged branch had no auth of its
+  own; and the **open gap** — `HttpMovement` still speaks the draft
+  `contracts/movement_api.md` shape and cannot drive this service yet,
+  because the robot's `[x,y,z,rx,ry,rz]` + `tool_down_rpy` pose convention
+  vs. the orchestrator's 4x4 `base_T_grasp` matrices is unconfirmed and must
+  not be guessed since it drives real robot motion). Extended
+  `System/architecture.md`: pipeline diagram, stage table's Movement row
+  (now "service built + deployed, adapter TODO" instead of pure external
+  placeholder), the paragraph below the table, and the "Not yet built"
+  section (split the old combined "movement + grip" bullet into a
+  service-landed movement-adapter bullet and a still-fully-external
+  grip-sensor bullet); added `System/robot_control.md` and ADR 0010 to
+  Related Docs. Extended `System/orchestrator.md`: "Teammate-owned contracts"
+  section rewritten to reflect the movement service landing (`robot_control/`
+  is a real FastAPI app over a TCP-socket robot connection, not a NeuraPy-
+  wrapping REST service as originally guessed; its actual routes vs. the
+  draft contract), added `System/robot_control.md`/ADR 0010 to Related Docs.
+  Added both new docs to `README.md`'s System and Decisions indices. (Root
+  `README.md`/`deploy/README.md` were updated by the calling task directly,
+  commit `4e5213d` — not duplicated here; see those files.)
 - 2026-07-07 — Remote GPU-server deployment of perception documented as
   **in progress** (commit `5fbacdf`, "perception: parametrize base image via
   BASE_IMAGE build-arg", plus uncommitted `perception/README.md` additions
