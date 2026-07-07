@@ -2,37 +2,17 @@ import { useMemo } from "react";
 import { useRun } from "../hooks/runContext";
 import { useServiceHealth } from "../hooks/useServiceHealth";
 import { streamUrl } from "../config/runtime";
+import { deriveInspections } from "../lib/derive";
 import { Card } from "../components/ui";
 import ServiceInfo from "../components/ServiceInfo";
 import MjpegView from "../components/MjpegView";
 import BinTally from "../components/BinTally";
 
-interface InspectedPart {
-  step: number;
-  part: string;
-  verdict: string;
-  bin: string;
-}
-
 export default function InspectionPage() {
   const run = useRun();
   const { health } = useServiceHealth();
 
-  // Pair each SORT with the part name from its step's LOCATE.
-  const inspected = useMemo<InspectedPart[]>(() => {
-    const partByStep = new Map<number, string>();
-    for (const e of run.events) {
-      if (e.state === "LOCATE") partByStep.set(e.step, String(e.data.part ?? "—"));
-    }
-    return run.events
-      .filter((e) => e.state === "SORT")
-      .map((e) => ({
-        step: e.step,
-        part: partByStep.get(e.step) ?? "—",
-        verdict: String(e.data.verdict ?? ""),
-        bin: String(e.data.bin ?? ""),
-      }));
-  }, [run.events]);
+  const inspected = useMemo(() => deriveInspections(run.events), [run.events]);
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

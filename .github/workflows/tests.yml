@@ -51,6 +51,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Unit tests
+        run: npm test
+
       # `npm run build` = `tsc -b && vite build`, so this gates both the
       # TypeScript type-check and a clean production build of the dashboard.
       - name: Type-check and build

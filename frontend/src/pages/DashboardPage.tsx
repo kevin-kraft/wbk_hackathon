@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useRun } from "../hooks/runContext";
 import { streamUrl } from "../config/runtime";
+import { currentPart } from "../lib/derive";
 import { Card } from "../components/ui";
 import RunControls from "../components/RunControls";
 import StageTracker from "../components/StageTracker";
@@ -14,14 +15,7 @@ export default function DashboardPage() {
   const run = useRun();
 
   // Current part + step, derived from the latest LOCATE.
-  const current = useMemo(() => {
-    for (let i = run.events.length - 1; i >= 0; i--) {
-      if (run.events[i].state === "LOCATE") {
-        return { part: String(run.events[i].data.part ?? "—"), step: run.events[i].step };
-      }
-    }
-    return { part: "—", step: 0 };
-  }, [run.events]);
+  const current = useMemo(() => currentPart(run.events), [run.events]);
 
   return (
     <div className="space-y-4">

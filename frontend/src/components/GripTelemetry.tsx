@@ -1,28 +1,15 @@
 import type { LoopEvent } from "../lib/types";
+import { deriveGrip } from "../lib/derive";
 
-// Derives the grip state for the *current* part from the event stream. The
-// motor-current value comes from the live grip-sensor endpoint (contracts/grip_api.md)
-// once wired; until then we show the binary verdict + retry count the loop reports,
-// which is the "rectify grabbing mistakes" behaviour made visible.
+// Renders the grip state for the *current* part. The motor-current value comes
+// from the live grip-sensor endpoint (contracts/grip_api.md) once wired; until
+// then we show the binary verdict + retry count the loop reports, which is the
+// "rectify grabbing mistakes" behaviour made visible.
 export default function GripTelemetry({ events }: { events: LoopEvent[] }) {
-  // Look back to the most recent LOCATE to scope "this part".
-  let startIdx = 0;
-  for (let i = events.length - 1; i >= 0; i--) {
-    if (events[i].state === "LOCATE") {
-      startIdx = i;
-      break;
-    }
-  }
-  const partEvents = events.slice(startIdx);
-  const attempts = partEvents.filter((e) => e.state === "REGRASP").length;
-  const confirmed = [...partEvents].reverse().find((e) => e.state === "GRIP");
-  const retrying = partEvents.length > 0 && partEvents[partEvents.length - 1].state === "REGRASP";
+  const { attempts, confirmed, retrying } = deriveGrip(events);
 
-  const status: { label: string; cls: string; pulse: boolean } = confirmed
-    ? { label: "GRASPED", cls: "text-emerald-300", pulse: false }
-    : retrying
-      ? { label: "REGRASPING", cls: "text-amber-300", pulse: true }
-      : { label: "IDLE", cls: "text-zinc-500", pulse: false };
+  const label = confirmed ? "GRASPED" : retrying ? "REGRASPING" : "IDLE";
+  const labelCls = confirmed ? "text-emerald-300" : retrying ? "text-amber-300" : "text-zinc-500";
 
   return (
     <div className="space-y-3">
@@ -31,9 +18,9 @@ export default function GripTelemetry({ events }: { events: LoopEvent[] }) {
           <span
             className={`inline-block h-3 w-3 rounded-full ${
               confirmed ? "bg-emerald-400" : retrying ? "bg-amber-400" : "bg-zinc-600"
-            } ${status.pulse ? "animate-pulse" : ""}`}
+            } ${retrying ? "animate-pulse" : ""}`}
           />
-          <span className={`font-mono text-lg font-semibold ${status.cls}`}>{status.label}</span>
+          <span className={`font-mono text-lg font-semibold ${labelCls}`}>{label}</span>
         </div>
         <div className="text-right">
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">Retries</div>
