@@ -103,10 +103,10 @@ base_T_grasp = T_base_cam · cam_T_obj · obj_T_grasp
 - `cam_T_obj` — object pose from the pose stage (camera frame, metres).
 - **`T_base_cam`** — the hand-eye extrinsic, **eye-to-hand** (camera fixed to the
   world / ceiling), so a single **static** 4×4 solved once by calibration — never
-  recomposed per frame. Supply it as `T_BASE_CAM` (flat-16 row-major JSON,
-  `base←camera`). If your calibration outputs mm (e.g. Zivid), set
-  `T_BASE_CAM_UNITS=mm` and it's converted to metres to match the pose stage.
-  Until provided it defaults to **identity**, which makes grasps wrong.
+  recomposed per frame. **Defaults to the calibrated result solved 2026-07-07**
+  (`_BASE_CAM_CALIBRATED` in `config.py`, stored in metres). Override via
+  `T_BASE_CAM` (flat-16 row-major JSON, `base←camera`) after a re-calibration; if
+  that output is in mm (e.g. Zivid), set `T_BASE_CAM_UNITS=mm` to convert to metres.
 - `obj_T_grasp` — grasp offset in the object frame (from CAD / the grasp planner),
   via `T_OBJ_GRASP`; defaults to identity (grasp at the object origin).
 
@@ -115,8 +115,10 @@ robot the base frame *is* the world frame, so `T_base_cam` is all that's needed.
 Final grasp accuracy is bounded by the worst link in the chain (calibration
 residuals, robot mastering, and pose-estimate noise each tighten one link).
 
-Calibration matrices will be provided after the arm is calibrated; they drop into
-`T_BASE_CAM` / `T_OBJ_GRASP` with no code change.
+The `T_base_cam` calibration is baked in (solved 2026-07-07); `obj_T_grasp` still
+defaults to identity (grasp at the object origin) — set `T_OBJ_GRASP` when the
+grasp planner / CAD provides a real offset. A re-calibration drops into
+`T_BASE_CAM` with no code change.
 
 ## Layout
 

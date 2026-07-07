@@ -16,16 +16,33 @@ def _identity4x4() -> list[list[float]]:
     return [[1.0 if i == j else 0.0 for j in range(4)] for i in range(4)]
 
 
-def _load_matrix(env_name: str, units_env: str | None = None) -> list[list[float]]:
-    """Load a 4x4 transform from a flat-16 row-major JSON env var (identity if unset).
+# Hand-eye calibration result (eye-to-hand, base<-camera), solved 2026-07-07.
+# The calibration output translation was in mm (−174.7977, −55.13062, 1199.66);
+# stored here in METRES to match the pose stage. This is the default T_base_cam;
+# override via the T_BASE_CAM env var if the arm is re-calibrated (no code change).
+_BASE_CAM_CALIBRATED: list[list[float]] = [
+    [-0.7971158, -0.488645, 0.3547288, -0.1747977],
+    [-0.4955818, 0.8650522, 0.07799571, -0.05513062],
+    [-0.3449712, -0.1136255, -0.9317103, 1.19966],
+    [0.0, 0.0, 0.0, 1.0],
+]
 
+
+def _load_matrix(
+    env_name: str,
+    units_env: str | None = None,
+    default: list[list[float]] | None = None,
+) -> list[list[float]]:
+    """Load a 4x4 transform from a flat-16 row-major JSON env var.
+
+    Falls back to `default` when the env var is unset (identity if no default).
     If `units_env` resolves to "mm", the translation column is converted to
     metres — the pose stage emits metres, so a mm extrinsic (e.g. straight from
     Zivid hand-eye calibration) must be scaled before composing with it.
     """
     raw = os.getenv(env_name)
     if not raw:
-        return _identity4x4()
+        return [row[:] for row in default] if default is not None else _identity4x4()
     flat = [float(x) for x in json.loads(raw)]
     if len(flat) != 16:
         raise ValueError(f"{env_name} must be 16 numbers (flat 4x4 row-major), got {len(flat)}")
@@ -62,11 +79,13 @@ class OrchestratorConfig:
 
     # --- hand-eye calibration + grasp geometry ---
     # base<-camera extrinsics: eye-to-hand (camera fixed to the world), so a single
-    # STATIC matrix — never recomposed per frame. Supply via T_BASE_CAM as flat-16
-    # row-major JSON (base<-camera). Set T_BASE_CAM_UNITS=mm if the calibration
-    # output translation is in mm (e.g. Zivid); it is converted to metres.
-    # Provided after calibration; identity is a placeholder that makes grasps wrong.
-    T_base_cam: list[list[float]] = field(default_factory=lambda: _load_matrix("T_BASE_CAM", "T_BASE_CAM_UNITS"))
+    # STATIC matrix — never recomposed per frame. Defaults to the calibrated result
+    # solved 2026-07-07 (_BASE_CAM_CALIBRATED, in metres). Override via T_BASE_CAM as
+    # flat-16 row-major JSON (base<-camera) after a re-calibration; set
+    # T_BASE_CAM_UNITS=mm if that output translation is in mm (converted to metres).
+    T_base_cam: list[list[float]] = field(
+        default_factory=lambda: _load_matrix("T_BASE_CAM", "T_BASE_CAM_UNITS", default=_BASE_CAM_CALIBRATED)
+    )
     # Grasp offset in the OBJECT frame (obj->grasp), from CAD / the grasp planner.
     # Full runtime chain: base_T_grasp = T_base_cam @ cam_T_obj @ obj_T_grasp.
     obj_T_grasp: list[list[float]] = field(default_factory=lambda: _load_matrix("T_OBJ_GRASP", "T_OBJ_GRASP_UNITS"))
