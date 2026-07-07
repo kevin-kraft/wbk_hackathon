@@ -40,6 +40,11 @@ Open/close the gripper.
 { "ok": true, "closed": true }
 ```
 
+**Close must block until the gripper settles/stalls** — the orchestrator reads the
+current-based grip sensor (`grip_api.md`) immediately after, and needs a
+steady-state (not inrush) reading. If the gripper reports position, returning
+`width` here helps the grip sensor disambiguate held-vs-end-stop.
+
 ## `GET /state` (optional, nice to have)
 ```jsonc
 { "tcp_pose": [[..4x4..]], "joints": [..], "moving": false }

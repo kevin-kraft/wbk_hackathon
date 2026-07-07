@@ -83,9 +83,11 @@ Two VLM roles the challenge calls for, with clean seams already in place:
    **part description or a prompt**. Slots in as an alternative `PerceptionClient.
    next_part` backend (today it's LocateAnything). No loop changes needed.
 2. **VLM grip verification** — a visual check that the grip is correct, running
-   **alongside** the binary pressure sensor in `_grasp_with_retry` as a second
-   opinion (catches wrong-part / partial grips the 0/1 sensor can't tell apart).
-   Add a `GripVerifier` protocol and AND it with `GripSensor` in the retry gate.
+   **alongside** the grip sensor in `_grasp_with_retry` as a second opinion. The
+   grip sensor is motor-current-based (see `contracts/grip_api.md`), so its analog
+   `current`/`width` already give a *partial-grip* signal; the VLM adds the
+   semantic/geometric "is it the **right** part, gripped squarely" judgment the
+   current can't. Add a `GripVerifier` protocol and AND it with `GripSensor`.
 
 Also future: a real grasp-planning module (replacing `NaiveTopDownGrasp`) and an
 RGB-D scene-camera client.
