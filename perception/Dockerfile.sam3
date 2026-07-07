@@ -1,0 +1,32 @@
+# SAM 3 as a standalone image (transformers 5.x — see requirements-sam3.txt for
+# why it's split from the yolo/locateanything image). Single uvicorn process,
+# no supervisor.
+#
+# Override base for newer GPUs, e.g. Blackwell (sm_120):
+#   --build-arg BASE_IMAGE=pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
+ARG BASE_IMAGE=pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+FROM ${BASE_IMAGE}
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PERCEPTION_DEVICE=cuda \
+    WEIGHTS_DIR=/weights \
+    HF_HOME=/root/.cache/huggingface
+
+WORKDIR /app/perception
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Deps first for layer caching.
+COPY requirements-sam3.txt .
+RUN pip install --no-cache-dir -r requirements-sam3.txt
+
+# App code (shares the perception package; only services.sam3 is served).
+COPY . .
+
+# sam3 :8002
+EXPOSE 8002
+
+CMD ["uvicorn", "services.sam3.main:app", "--host", "0.0.0.0", "--port", "8002"]

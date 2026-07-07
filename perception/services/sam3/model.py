@@ -37,13 +37,16 @@ class Sam3Backend(BasePerceptionModel):
 
         device = self._resolve_device()
         model_id = self.settings.sam3_model_id or _DEFAULT_MODEL_ID
+        # facebook/sam3 is gated; load from the pre-provisioned HF cache without
+        # an online auth round-trip (see Settings.sam3_local_files_only).
+        lfo = self.settings.sam3_local_files_only
 
         # Concept (text) head.
-        self._concept = Sam3Model.from_pretrained(model_id).to(device)
-        self._concept_proc = Sam3Processor.from_pretrained(model_id)
+        self._concept = Sam3Model.from_pretrained(model_id, local_files_only=lfo).to(device)
+        self._concept_proc = Sam3Processor.from_pretrained(model_id, local_files_only=lfo)
         # Tracker (point / box) head.
-        self._tracker = Sam3TrackerModel.from_pretrained(model_id).to(device)
-        self._tracker_proc = Sam3TrackerProcessor.from_pretrained(model_id)
+        self._tracker = Sam3TrackerModel.from_pretrained(model_id, local_files_only=lfo).to(device)
+        self._tracker_proc = Sam3TrackerProcessor.from_pretrained(model_id, local_files_only=lfo)
 
         self._model_id = model_id
         self._loaded = True

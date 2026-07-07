@@ -1,0 +1,22 @@
+# SAM 3 runs in its OWN image, separate from yolo/locateanything.
+#
+# Reason: SAM 3 (Sam3Model, added 2025-11) needs transformers 5.x, while
+# LocateAnything-3B's remote code needs the 4.57.x AutoImageProcessor.register
+# API (5.x broke it). The two constraints can't coexist in one env, so this
+# file pins 5.x and the main requirements.txt pins 4.57.1.
+#
+# torch / torchvision come from the CUDA base image — intentionally NOT listed.
+
+# --- shared / web ---
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+numpy>=1.26
+pillow>=10.3
+opencv-python-headless>=4.9
+python-multipart>=0.0.9
+
+# --- sam3 ---
+transformers==5.13.0
+accelerate>=0.30
+huggingface-hub>=0.25
