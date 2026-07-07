@@ -31,6 +31,7 @@ implementation-level detail on top of those, not a duplicate of them.
 - [`SOP/running_services.md`](./SOP/running_services.md) — `docker compose` commands per stage, prerequisites (GPU toolkit, gated SAM3 weights, OpenRouter key), building the two pose GPU base images first, per-object CAD/template assets required.
 - [`SOP/running_tests.md`](./SOP/running_tests.md) — `uv sync && uv run pytest`, the per-stage import-root split in `conftest.py`, the deferred-import convention, what's intentionally untested.
 - [`SOP/running_orchestrator_dry_run.md`](./SOP/running_orchestrator_dry_run.md) — `python -m orchestrator.dry_run` (full loop, all mocked, no GPU/services/hardware), running the orchestrator as a service (`:8000`, `dry_run=true|false`), running just the orchestrator tests.
+- [`SOP/deploy_perception_gpu_server.md`](./SOP/deploy_perception_gpu_server.md) — deploying perception to a remote GPU server: the `ARG BASE_IMAGE` build-arg for Blackwell GPUs, rsync'ing HF weights instead of re-downloading, running bound to `127.0.0.1`, reaching it via an SSH tunnel. **In progress** — image built + weights transferring, not yet running/tunneled; pose deployment not started.
 
 ## Tasks
 

@@ -14,6 +14,7 @@
 - [SOP: running the services](../SOP/running_services.md)
 - [SOP: running the tests](../SOP/running_tests.md)
 - [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
+- [SOP: deploying perception to a remote GPU server](../SOP/deploy_perception_gpu_server.md) — in progress, not yet running
 
 ## What this is
 
@@ -87,6 +88,14 @@ processes under `supervisord` (see [`perception/supervisord.conf`](../../percept
 Each is its own `uvicorn` process on its own port — this is a deliberate
 choice so any one service can be lifted into its own container later without
 a rewrite (see ADR 0001).
+
+`perception/Dockerfile`'s base image is parametrized via `ARG BASE_IMAGE`
+(default `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`, commit `5fbacdf`) —
+Blackwell GPUs (sm_120, e.g. RTX PRO 6000) need it overridden to a CUDA
+12.8/torch 2.8 base at build time. `requirements.txt` deliberately excludes
+torch so the base image's own build is used untouched. See
+[SOP: deploying perception to a remote GPU server](../SOP/deploy_perception_gpu_server.md)
+(in progress, not yet running) for the full recipe.
 
 | Service | Port | Job | Backend | Module |
 |---|---|---|---|---|

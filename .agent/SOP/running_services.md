@@ -9,6 +9,7 @@
 - [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — the optional `WBK_API_TOKEN` referenced below
 - [SOP: running the tests](./running_tests.md)
 - [SOP: running the orchestrator dry-run](./running_orchestrator_dry_run.md) — run the full loop with no services/GPU/hardware at all
+- [SOP: deploying perception to a remote GPU server](./deploy_perception_gpu_server.md) — the distributed-host alternative to this single-host path; in progress, not yet running
 
 All commands below run from the repo root (`/home/yannic/code/wbk-hackerthon`)
 unless noted. Everything is driven by the single `docker-compose.yml`.
@@ -33,9 +34,17 @@ docker compose up --build perception
 ```
 
 This builds one image from `perception/Dockerfile` (base:
-`pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`) and runs all three services
-under `supervisord` inside it, exposing `:8001` (yolo), `:8002` (sam3),
-`:8003` (locateanything).
+`pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`, overridable via `ARG
+BASE_IMAGE` — see below) and runs all three services under `supervisord`
+inside it, exposing `:8001` (yolo), `:8002` (sam3), `:8003` (locateanything).
+
+On a Blackwell GPU (sm_120, e.g. RTX PRO 6000), the default base image won't
+run — override it: `docker build --build-arg
+BASE_IMAGE=pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel ...`. This is also the
+starting point for deploying perception to a separate GPU server rather than
+running it alongside the other services locally — see
+[SOP: deploying perception to a remote GPU server](./deploy_perception_gpu_server.md)
+(in progress, not yet running).
 
 Weights: the compose file mounts `hf-cache:/root/.cache/huggingface` (a named
 volume) and `./weights:/weights` (bind mount, `WEIGHTS_DIR=/weights`). Per the

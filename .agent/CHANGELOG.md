@@ -2,6 +2,32 @@
 
 Newest first.
 
+- 2026-07-07 — Remote GPU-server deployment of perception documented as
+  **in progress** (commit `5fbacdf`, "perception: parametrize base image via
+  BASE_IMAGE build-arg", plus uncommitted `perception/README.md` additions
+  at the time of this doc update). Added
+  `SOP/deploy_perception_gpu_server.md`: the `ARG BASE_IMAGE` override
+  needed for Blackwell GPUs (sm_120, e.g. RTX PRO 6000 →
+  `pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel`, verified `torch
+  2.8.0+cu128`/`transformers 4.57.1`/`ultralytics 8.4.90`), why
+  `requirements.txt` omits torch, the rsync-instead-of-redownload weights
+  recipe for a server with no HF auth (gated SAM 3 + LocateAnything-3B),
+  running the container bound to `127.0.0.1:6767-6769` on the server, and
+  the SSH port-forward tunnel (`-L 8001:localhost:6767` etc.) that lets the
+  orchestrator's existing `PERCEPTION_*_URL` defaults
+  (`http://localhost:800{1,2,3}`) keep working unchanged. Documented the
+  intended split — orchestrator + damage + dashboard local, perception +
+  pose on the GPU server — and the shared-Docker-daemon
+  no-isolation-from-co-tenants caveat (secrets stay off the box). Explicitly
+  flagged as **not yet a working deployment**: image built + weights
+  rsync'ing, container not yet started, tunnel not yet established, pose not
+  started. Extended `System/architecture.md`'s Stage 1 Perception section
+  with the `ARG BASE_IMAGE` parametrization and a link to the new SOP (also
+  added to that doc's Related Docs). Extended
+  `SOP/running_services.md`'s perception section with the Blackwell
+  build-arg override and a pointer to the new SOP (also added to its
+  Related Docs). Added the new SOP to `README.md`'s SOP index, marked
+  in-progress.
 - 2026-07-07 — Shared-token auth (`WBK_API_TOKEN`) documented as **implemented**
   (commit `749b179`, "feat(auth): shared-token gate on work + robot
   endpoints") — previously only anticipated as a gap in ADR 0008's
