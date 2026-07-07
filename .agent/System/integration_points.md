@@ -2,13 +2,16 @@
 
 ## Related Docs
 - [Architecture](./architecture.md) — pipeline overview and per-stage service map
+- [System: Orchestrator](./orchestrator.md) — the orchestrator's `HttpPerception`/`HttpPose`/`HttpDamage` clients are consumers of the three contracts below
 - [ADR: pose contract reuses kip-pose-viewer](../Decisions/0004-pose-contract-reuses-kip-pose-viewer.md)
 - [SOP: running the services](../SOP/running_services.md)
 
 This doc covers the things a change to *any* stage is likely to touch: the
 wire contracts between stages, the shared model-adapter pattern, and the
 model-weight cache mount. Read this before modifying `schemas.py` in any
-stage, or before adding a new perception/pose backend.
+stage, or before adding a new perception/pose backend — a breaking change
+here also breaks the orchestrator's HTTP clients
+(`orchestrator/clients/http_perception.py`, `http_pose.py`, `http_damage.py`).
 
 ## Design conventions shared across all three stages
 

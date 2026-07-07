@@ -1,13 +1,16 @@
 # Architecture — VLM-Guided Robotic Disassembly
 
 ## Related Docs
+- [System: Orchestrator](./orchestrator.md) — the state machine that ties every stage below together, the Protocol/client seam, loop states
 - [Integration Points & Wire Contracts](./integration_points.md) — the base64-in-JSON contracts, model-adapter pattern, HF cache mount
 - [ADR: perception shared container vs. pose split containers](../Decisions/0001-perception-shared-container-pose-split-containers.md)
 - [ADR: perception model stack](../Decisions/0002-perception-model-stack.md)
 - [ADR: damage fail-safe sort policy](../Decisions/0003-damage-failsafe-sort-policy.md)
 - [ADR: pose contract reuses kip-pose-viewer](../Decisions/0004-pose-contract-reuses-kip-pose-viewer.md)
+- [ADR: mock-first, interface-seam integration](../Decisions/0005-mock-first-interface-seam-integration.md) — how the orchestrator runs the full loop today against mocks for teammate-owned pieces
 - [SOP: running the services](../SOP/running_services.md)
 - [SOP: running the tests](../SOP/running_tests.md)
+- [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
 
 ## What this is
 
@@ -29,26 +32,40 @@ implementation-level detail (ports, containers, code layout) on top of those.
 ## Pipeline
 
 ```
-scene cam ─► PERCEPTION ─► 6DoF POSE ─► GRASP PLANNING ─► MOVEMENT ─► DAMAGE ─► bin
-             (yolo/sam3/    (foundation   (future)         (future)     (OpenRouter
-              locate)        pose/giga)                                  VLM)   └─► loop back to PERCEPTION
+              ┌────────────────  ORCHESTRATOR  (state machine, :8000) ────────────────┐
+              ▼                                                                       │
+ scene cam ─► PERCEPTION ─► 6DoF POSE ─► GRASP PLANNING ─► MOVEMENT ─► [grip sensor] ─► DAMAGE ─► bin
+              (yolo/sam3/    (foundation   (naive/future)   (Jetson,     (0/1 rectify)   (OpenRouter
+               locate)        pose/giga)                     external)                    VLM)   └─► loop back to PERCEPTION
 ```
+
+The **orchestrator** (`orchestrator/`, added `3abc923`) is the state machine
+that drives this whole loop, calling each stage through pluggable clients —
+see [System: Orchestrator](./orchestrator.md) for the loop states and the
+Protocol seam, and [ADR 0005](../Decisions/0005-mock-first-interface-seam-integration.md)
+for why it runs today against mocks for the pieces still in progress.
 
 | Stage | Dir | Services (port) | Containers | Hardware | Status |
 |---|---|---|---|---|---|
+| Orchestrator | `orchestrator/` | orchestrator `:8000` | 1 | CPU | Built (mock-driven; also drives real services) |
 | Perception | `perception/` | yolo `:8001`, sam3 `:8002`, locateanything `:8003` | 1 (supervisord) | GPU | Built |
 | 6DoF pose | `pose/` | foundationpose `:8004`, gigapose `:8005` | 2 (siblings) | GPU | Built |
-| Grasp planning | — | — | — | — | Future — not built |
-| Movement | — | — | — | — | Future — not built |
+| Grasp planning | `orchestrator/clients/naive_grasp.py` | — (in-process) | — | CPU | Naive placeholder — real module not built |
+| Movement | — | Jetson endpoint (external) | — | — | Teammate-owned, in progress — [proposed contract](../../contracts/movement_api.md) |
+| Grip detection | — | pressure sensor (external) | — | — | Teammate-owned, in progress — [proposed contract](../../contracts/grip_api.md) |
 | Damage inspection | `damage/` | damage `:8006` | 1 | CPU | Built |
 
-Grasp planning and movement are the two stages between pose and damage that do
-not exist yet in this repo — no directories, no code. Confirmed by `find` scan
-of the repo root: only `perception/`, `pose/`, `damage/`, `docs/`, `tests/` exist.
+Grasp planning now has a working (if deliberately naive) placeholder in this
+repo, and movement/grip detection now have proposed wire contracts and real
+HTTP clients (`orchestrator/clients/http_movement.py`,
+`orchestrator/clients/http_grip.py`) written against them — but the arm and
+sensor endpoints themselves are external, teammate-owned, and not yet online.
+See [System: Orchestrator](./orchestrator.md) "Teammate-owned contracts" and
+"Two future VLM roles" for exactly what is and isn't built.
 
 All stages are wired together in [`docker-compose.yml`](../../docker-compose.yml)
-at the repo root (one `services:` entry per container: `perception`,
-`foundationpose`, `gigapose`, `damage`).
+at the repo root (one `services:` entry per container: `orchestrator`,
+`perception`, `foundationpose`, `gigapose`, `damage`).
 
 ## Stage 1 — Perception (`perception/`)
 
@@ -140,21 +157,42 @@ Runtime import root: repo root (`damage/__init__.py` exists, run as package `dam
 
 ## Not yet built
 
-**Grasp planning** and **movement** are the two pipeline stages between pose
-and damage. As of this scan (2026-07-07) there is no code, directory, or
-service for either — they are named only in the README/architecture diagrams
-as future work. Do not assume any contract for them exists yet.
+As of the orchestrator addition (`3abc923`, 2026-07-07):
+
+- **Real grasp planning** — `NaiveTopDownGrasp` (`orchestrator/clients/naive_grasp.py`)
+  is a placeholder (top-down at the object origin, fixed stand-off, no
+  gripper geometry). No real planning module exists yet.
+- **Movement (Jetson arm) and grip-sensor hardware** — both are external,
+  teammate-owned. This repo now has real HTTP clients
+  (`orchestrator/clients/http_movement.py`, `http_grip.py`) and proposed
+  contracts (`contracts/movement_api.md`, `contracts/grip_api.md`) for them,
+  but the endpoints themselves are not yet online — do not assume they are
+  reachable.
+- **YOLO detection tuning** for the specific disassembly-part vocabulary is
+  still moving; the orchestrator runs against mocks for `next_part` in the
+  interim (see [System: Orchestrator](./orchestrator.md)).
+- **Two VLM roles from the task spec** — VLM next-part selection (an
+  alternative `PerceptionClient.next_part` backend) and VLM grip
+  verification (a second opinion alongside the binary grip sensor). Both
+  have a clean seam in the Protocol design but neither is implemented — see
+  [System: Orchestrator](./orchestrator.md) "Two future VLM roles".
 
 ## Test suite
 
-81 pytest tests (`tests/`) covering pure logic only — schemas, image/tensor
-codecs, the LocateAnything token parser, prompt building, the damage bin
-policy, and FastAPI route wiring with model adapters mocked. No GPU, no model
-weights, no `OPENROUTER_API_KEY`, no network. See
+86 pytest tests (`tests/`), up from 81 before the orchestrator: 81 covering
+pure logic in perception/pose/damage (schemas, image/tensor codecs, the
+LocateAnything token parser, prompt building, the damage bin policy, FastAPI
+route wiring with model adapters mocked) plus 5 in
+`tests/orchestrator/test_loop.py` running the full disassembly loop
+end-to-end against mocks (rectify-retry, reject-bin routing, blacklisting an
+ungraspable part, bounded termination). No GPU, no model weights, no
+`OPENROUTER_API_KEY`, no network, no hardware. See
 [SOP: running the tests](../SOP/running_tests.md) for the conftest.py
 per-stage import-root subtlety and what's intentionally NOT covered
 (`*.load()`/`*.infer()`/`*.estimate()` on all five real model adapters).
 
 CI: `.github/workflows/tests.yml` runs `uv sync --frozen && uv run pytest -q`
-on push/PR to `main`. Currently green (last commit: `7cf5211`, "Add GitHub
-Actions CI to run tests on push/PR to main").
+on push/PR to `main`. Green as of `7cf5211` ("Add GitHub Actions CI to run
+tests on push/PR to main") — 86-test collection locally confirmed as of
+`3abc923` ("Add orchestrator..."), but CI run status for that commit was not
+re-checked as part of this doc update.

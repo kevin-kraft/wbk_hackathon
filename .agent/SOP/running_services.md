@@ -3,9 +3,11 @@
 ## Related Docs
 - [Architecture](../System/architecture.md) — what each service does and its port
 - [Integration Points](../System/integration_points.md) — wire contracts, HF cache mount
+- [System: Orchestrator](../System/orchestrator.md) — the state machine that drives all of these services together
 - [ADR: perception shared container vs. pose split containers](../Decisions/0001-perception-shared-container-pose-split-containers.md)
 - [ADR: pose contract reuses kip-pose-viewer](../Decisions/0004-pose-contract-reuses-kip-pose-viewer.md)
 - [SOP: running the tests](./running_tests.md)
+- [SOP: running the orchestrator dry-run](./running_orchestrator_dry_run.md) — run the full loop with no services/GPU/hardware at all
 
 All commands below run from the repo root (`/home/yannic/code/wbk-hackerthon`)
 unless noted. Everything is driven by the single `docker-compose.yml`.
