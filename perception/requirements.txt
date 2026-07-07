@@ -1,0 +1,26 @@
+# Consolidated deps installed into the perception container image.
+# torch / torchvision come from the CUDA base image (pytorch/pytorch:2.5.1-cuda12.4)
+# and are intentionally NOT listed here.
+#
+# Per-service requirements.txt files (services/*/requirements.txt) mirror these
+# for the future case of splitting a service into its own image.
+
+# --- shared / web ---
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+numpy>=1.26
+pillow>=10.3
+opencv-python-headless>=4.9
+python-multipart>=0.0.9
+supervisor>=4.2
+
+# --- yolo ---
+ultralytics>=8.3.0
+
+# --- sam3 + locateanything (shared HF stack; 4.57.1 satisfies both) ---
+transformers==4.57.1
+accelerate>=0.30
+huggingface-hub>=0.25
+peft>=0.11
+decord>=0.6

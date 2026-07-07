@@ -1,0 +1,20 @@
+[project]
+name = "wbk-hackerthon-tests"
+version = "0.0.0"
+description = "Test-only environment for the wbk-hackerthon monorepo (perception / pose / damage)."
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pillow>=10.3",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "pydantic>=2.7",
+    "fastapi>=0.115",
+    "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

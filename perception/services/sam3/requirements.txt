@@ -1,0 +1,5 @@
+# SAM3 service-specific deps (for future extraction into its own image).
+# Weights (facebook/sam3) are gated on HuggingFace — `hf auth login` first.
+transformers>=4.57
+accelerate>=0.30
+huggingface-hub>=0.25

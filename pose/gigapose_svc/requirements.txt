@@ -1,0 +1,8 @@
+# GigaPose service web deps only. The heavy stack (torch, xformers, panda3d,
+# pytorch3d, MegaPose, GigaPose itself + numpy<2) comes from the
+# `gigapose:blackwell` base image — see Dockerfile and pose/README.md.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+python-multipart>=0.0.9
+opencv-python-headless>=4.9

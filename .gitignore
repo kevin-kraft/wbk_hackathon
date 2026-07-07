@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Model weights / assets (mounted or downloaded, not committed)
+weights/
+pose/assets/meshes/
+damage/reference/
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.obj
+*.ply
+*.glb
+
+# Env / secrets
+.env
+*.local
+
+# OS
+.DS_Store

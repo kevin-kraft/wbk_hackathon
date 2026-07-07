@@ -1,0 +1,10 @@
+# Deps shared by every perception service.
+# torch / torchvision are provided by the CUDA base image and intentionally NOT pinned here.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+numpy>=1.26
+pillow>=10.3
+opencv-python-headless>=4.9
+python-multipart>=0.0.9
+supervisor>=4.2

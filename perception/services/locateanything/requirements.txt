@@ -1,0 +1,6 @@
+# LocateAnything service-specific deps (for future extraction into its own image).
+# Weights (nvidia/LocateAnything-3B) are ungated but load via trust_remote_code.
+transformers>=4.57,<4.58
+peft>=0.11
+decord>=0.6
+huggingface-hub>=0.25

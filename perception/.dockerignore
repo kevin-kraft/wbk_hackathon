@@ -1,0 +1,9 @@
+**/__pycache__/
+**/*.pyc
+.venv/
+weights/
+*.pt
+*.pth
+*.onnx
+.git/
+.pytest_cache/

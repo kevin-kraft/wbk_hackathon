@@ -1,0 +1,86 @@
+# wbk_hackathon — VLM-guided robotic disassembly.
+# Pipeline stages as services. Perception + pose need an NVIDIA GPU + Container
+# Toolkit; damage is CPU-only. Grasp-planning and movement modules land later.
+#
+#   docker compose up --build perception          # 3 perception services
+#   docker compose up --build foundationpose gigapose   # 6DoF pose (needs base images, see pose/README.md)
+#   OPENROUTER_API_KEY=... docker compose up --build damage
+#
+# GPU syntax below uses `deploy.devices`; on older Docker replace with `gpus: all`.
+services:
+  # --- Perception: YOLO + SAM3 + LocateAnything in one container ---
+  perception:
+    build:
+      context: ./perception
+    image: wbk-perception:latest
+    container_name: wbk-perception
+    ports:
+      - "8001:8001" # yolo
+      - "8002:8002" # sam3
+      - "8003:8003" # locateanything
+    environment:
+      - PERCEPTION_DEVICE=cuda
+      - WEIGHTS_DIR=/weights
+    volumes:
+      - ./weights:/weights
+      - hf-cache:/root/.cache/huggingface
+    deploy: &gpu
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # --- 6DoF pose: FoundationPose (own image) ---
+  # Base image must be built first — see pose/README.md.
+  foundationpose:
+    build:
+      context: ./pose
+      dockerfile: foundationpose_svc/Dockerfile
+    image: wbk-foundationpose-svc:latest
+    container_name: wbk-foundationpose
+    ports:
+      - "8004:8004"
+    environment:
+      - FP_REPO=/workspace/FoundationPose
+      - FP_MESH_DIR=/meshes
+      - FP_CLASS_MESH=${FP_CLASS_MESH:-{}}
+    volumes:
+      - ${FOUNDATIONPOSE_REPO:-~/code/FoundationPose}:/workspace/FoundationPose
+      - ./pose/assets/meshes:/meshes
+    deploy: *gpu
+
+  # --- 6DoF pose: GigaPose (own image — incompatible deps with FoundationPose) ---
+  gigapose:
+    build:
+      context: ./pose
+      dockerfile: gigapose_svc/Dockerfile
+    image: wbk-gigapose-svc:latest
+    container_name: wbk-gigapose
+    ports:
+      - "8005:8005"
+    environment:
+      - GIGAPOSE_REPO=/workspace/GigaPose
+      - GP_DATASET=${GP_DATASET:-kip2}
+    volumes:
+      - ${GIGAPOSE_REPO:-~/code/GigaPose}:/workspace/GigaPose
+    deploy: *gpu
+
+  # --- Damage inspection: OpenRouter VLM (CPU) ---
+  damage:
+    build:
+      context: ./damage
+    image: wbk-damage:latest
+    container_name: wbk-damage
+    ports:
+      - "8006:8006"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}
+      - REFERENCE_DIR=/reference
+    volumes:
+      - ./damage/reference:/reference
+
+volumes:
+  hf-cache:

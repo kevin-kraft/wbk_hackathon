@@ -1,0 +1,7 @@
+# FoundationPose service web deps only. The heavy stack (torch, nvdiffrast,
+# pytorch3d, trimesh, FoundationPose itself) comes from the `foundationpose:blackwell`
+# base image — see Dockerfile and pose/README.md.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+opencv-python-headless>=4.9
