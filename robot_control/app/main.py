@@ -1,4 +1,3 @@
-import uvicorn
 from fastapi import Depends, FastAPI
 
 from app import env
@@ -21,6 +20,9 @@ def health():
 
 
 if __name__ == "__main__":
+    import uvicorn  # local import: the container starts via the `uvicorn` CLI, and
+    # importing it at module scope makes `app.main` un-importable without uvicorn.
+
     print(f"Starting LARA5 API Server on {env.API_HOST}:{env.API_PORT}")
 
     uvicorn.run(

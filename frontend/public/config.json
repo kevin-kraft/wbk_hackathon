@@ -8,8 +8,8 @@
     "foundationpose": "http://localhost:8004",
     "gigapose": "http://localhost:8005",
     "damage": "http://localhost:8006",
-    "movement": "http://jetson.local:9000",
-    "grip": "http://jetson.local:9001"
+    "movement": "http://172.22.192.166:9000",
+    "grip": "http://172.22.192.166:9001"
   },
   "streams": {
     "sceneCamera": "http://localhost:8080/stream.mjpg",

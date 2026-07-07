@@ -1,7 +1,8 @@
 """Shared pytest bootstrap.
 
-This monorepo is three sibling service dirs (`perception/`, `pose/`, `damage/`),
-each with its own import root at *runtime* (see supervisord.conf / Dockerfiles):
+This monorepo is four sibling service dirs (`perception/`, `pose/`, `damage/`,
+`robot_control/`), each with its own import root at *runtime* (see
+supervisord.conf / Dockerfiles):
 
   - damage/         is run as the package `damage` (repo root on PYTHONPATH,
                     `damage/__init__.py` exists) -> add the repo root.
@@ -12,8 +13,10 @@ each with its own import root at *runtime* (see supervisord.conf / Dockerfiles):
                     `gigapose_svc` with `pose/` as PYTHONPATH (see the service
                     Dockerfiles: ENV PYTHONPATH=/svc, COPY shared, COPY
                     foundationpose_svc) -> add `pose/`.
+  - robot_control/  is run as top-level `app` (the Jetson bridge FastAPI app),
+                    with `robot_control/` as PYTHONPATH -> add `robot_control/`.
 
-None of these three roots collide on a top-level module name, so all three can
+None of these four roots collide on a top-level module name, so all four can
 be on sys.path at once.
 """
 
@@ -28,6 +31,7 @@ _ROOTS = [
     REPO_ROOT,  # -> `damage`
     REPO_ROOT / "perception",  # -> `services`
     REPO_ROOT / "pose",  # -> `shared`, `foundationpose_svc`, `gigapose_svc`
+    REPO_ROOT / "robot_control",  # -> `app`
 ]
 
 for _root in _ROOTS:
