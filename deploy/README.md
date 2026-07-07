@@ -10,6 +10,7 @@ Images are published to the **GitHub Container Registry (GHCR)**, public:
 ```
 ghcr.io/kevin-kraft/wbk-orchestrator
 ghcr.io/kevin-kraft/wbk-damage
+ghcr.io/kevin-kraft/wbk-robot-control
 ghcr.io/kevin-kraft/wbk-dashboard
 ```
 
@@ -38,6 +39,7 @@ Public images need no `docker login` to pull. (Private ones would need a PAT wit
 |---|---|---|
 | `orchestrator/` | GHCR image + this compose | CPU, small, self-contained |
 | `damage/` | GHCR image + this compose | CPU, small; reference images baked in (see its README note) |
+| `robot-control/` | GHCR image + this compose | CPU, small; deploys **on the Jetson** (host networking) next to the LARA5 robot socket server. Fills the `MOVEMENT_URL` slot on `:9000` |
 | `dashboard/` | GHCR image + this compose | static nginx; only `config.json` is copied alongside |
 | **perception** | **built on the GPU server** | multi-GB CUDA image; runs only where the GPUs are |
 | **pose** (foundationpose/gigapose) | **built on the GPU server** | ~32 GB each + needs the `*:blackwell` base images and the FoundationPose/GigaPose source trees |

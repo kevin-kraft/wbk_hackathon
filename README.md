@@ -39,7 +39,7 @@ the Jetson movement endpoint, the grip sensor).
 | **Perception** | `perception/` | yolo `8001`, sam3 `8002`, locateanything `8003` | GPU (1 container) | ✅ scaffolded |
 | **6DoF pose** | `pose/` | foundationpose `8004`, gigapose `8005` | GPU (2 containers) | ✅ scaffolded |
 | **Grasp planning** | `orchestrator/` | naive placeholder | CPU | 🟡 stand-in |
-| **Movement (arm)** | — | Jetson endpoint (teammate) | — | 🔧 in progress · [contract](contracts/movement_api.md) |
+| **Movement (arm)** | `robot_control/` | robot-control `9000` (Jetson) | LARA5 robot | ✅ integrated (Group 2) · [contract](contracts/movement_api.md) |
 | **Grip detection** | — | pressure sensor (teammate) | — | 🔧 in progress · [contract](contracts/grip_api.md) |
 | **Damage inspection** | `damage/` | damage `8006` | CPU | ✅ scaffolded |
 | **Dashboard (UI)** | `frontend/` | dashboard `5173` | — | ✅ built (live SSE) |
@@ -114,7 +114,12 @@ which the dashboard consumes.
   **alongside** the binary pressure sensor (catches wrong-part / partial grips the
   0/1 signal can't distinguish).
 - Real **grasp-planning** module (replacing the naive placeholder) and the
-  **movement** + **grip-sensor** endpoints (teammates; contracts in `contracts/`).
+  **grip-sensor** endpoint (teammate; contract in `contracts/`). The **movement**
+  endpoint has landed as `robot_control/` (Group 2's Jetson bridge); its live API
+  (`/robot/hover/*`, `/robot/raw`, …) is richer than the draft
+  [`movement_api.md`](contracts/movement_api.md), so the orchestrator's
+  `HttpMovement` client still needs adapting to it (frames + pose conventions TBD
+  with the robot team).
 
 ## Repo layout
 
@@ -123,6 +128,7 @@ orchestrator/ disassembly state machine + stage clients + SSE stream (CPU coordi
 perception/   YOLO + SAM3 + LocateAnything   (1 GPU container)
 pose/         FoundationPose + GigaPose       (2 GPU containers)
 damage/       OpenRouter VLM damage inspection (CPU)
+robot_control/ Jetson-side movement bridge to the LARA5 robot (CPU, :9000)
 frontend/     operator console + live demo dashboard (React/Vite static app)
 deploy/       per-service standalone compose files for single-service deploys (GHCR) — see deploy/README.md
 contracts/    proposed Jetson-movement + grip-sensor APIs (hand-off to teammates)
@@ -132,7 +138,7 @@ docker-compose.yml
 
 Per-stage detail: [`orchestrator/README.md`](orchestrator/README.md) ·
 [`perception/README.md`](perception/README.md) · [`pose/README.md`](pose/README.md) ·
-[`damage/README.md`](damage/README.md) · [`frontend/README.md`](frontend/README.md).
+[`damage/README.md`](damage/README.md) · [`robot_control/README.md`](robot_control/README.md) · [`frontend/README.md`](frontend/README.md).
 
 ## Status
 
