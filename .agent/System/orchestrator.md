@@ -4,6 +4,8 @@
 - [Architecture](./architecture.md) — full pipeline overview, per-stage service map
 - [Integration Points & Wire Contracts](./integration_points.md) — perception/pose/damage wire contracts the orchestrator's HTTP clients speak
 - [ADR: mock-first, interface-seam integration](../Decisions/0005-mock-first-interface-seam-integration.md) — why the loop was built against Protocols + mocks before teammate-owned hardware existed
+- [ADR: eye-to-hand static calibration + grasp chain composition](../Decisions/0006-eye-to-hand-static-calibration.md) — why `T_base_cam` is a single static matrix and how the grasp chain composes
+- [ADR: motor-current-based grip sensing](../Decisions/0007-grip-motor-current-sensing.md) — why `/grip` moved from a binary pad to analog current, and the end-stop pitfall
 - [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
 - [SOP: running the services](../SOP/running_services.md)
 - `orchestrator/README.md` (in-repo) — the module's own README; this doc adds the `.agent/` cross-reference layer on top, not a duplicate
@@ -35,6 +37,10 @@ GRASP    _grasp_with_retry(...):
            grip.is_grasped()  ── sensor=0 ──► grasp.replan(...); retry
                                (up to config.max_grasp_attempts, default 3)
            sensor=1 ──► confirmed, continue
+           (the boolean itself is now derived from gripper motor current on
+           the hardware side, not a binary pad — see "Teammate-owned
+           contracts" below; the `GripSensor` Protocol and loop logic are
+           unaffected)
 REMOVE   move.move_named("clearance")        — lift clear
          perception.is_present(after, part)  — confirm it's actually gone
            still present => wrong/failed grab: release, retry from LOCATE
@@ -97,9 +103,55 @@ Env-driven `OrchestratorConfig` dataclass: URLs for the repo's own stages
 (`MOVEMENT_URL` default `http://jetson.local:9000`, `GRIP_URL` default
 `http://jetson.local:9001`); behavior knobs `MAX_GRASP_ATTEMPTS` (default 3),
 `MAX_STEPS` (default 50, the runaway-loop bound), `INSPECTION_ANGLES`
-(default 3); and `T_BASE_CAM`, the camera→base extrinsics (flat-16 JSON env
-var, identity default) the naive grasp planner uses to transform
-`T_cam_obj` into the robot base frame.
+(default 3); and three hand-eye-calibration / grasp-geometry fields —
+`T_base_cam`, `obj_T_grasp`, `grasp_approach_dist` — described next.
+
+## Hand-eye calibration & the grasp chain (`orchestrator/config.py`, `orchestrator/clients/naive_grasp.py`, commit `6994503`)
+
+`NaiveTopDownGrasp.plan()` computes the grasp pose in the robot **base
+frame** by composing three SE(3) transforms (matrix `@`, not element-wise):
+
+```
+base_T_grasp = T_base_cam @ cam_T_obj @ obj_T_grasp
+```
+
+| Term | Source | Config |
+|---|---|---|
+| `cam_T_obj` | pose stage output (`Pose.T_cam_obj`, metres, OpenCV camera frame) | per-frame, from `pose.estimate()` — not config |
+| `T_base_cam` | **static** hand-eye extrinsic, base←camera | env `T_BASE_CAM` (flat-16 row-major JSON); identity default |
+| `obj_T_grasp` | grasp offset in the object frame (from CAD / a future real grasp planner) | env `T_OBJ_GRASP` (flat-16 row-major JSON); identity default |
+
+Both matrices are parsed by `config._load_matrix()`, which also handles unit
+conversion: if `T_BASE_CAM_UNITS=mm` (or `T_OBJ_GRASP_UNITS=mm`) is set, the
+translation column is divided by 1000 before use — the pose stage's
+`T_cam_obj` is always in metres (see
+[Integration Points](./integration_points.md)), but calibration rigs (e.g.
+Zivid hand-eye calibration) commonly output translations in mm.
+
+Design facts (see
+[ADR 0006](../Decisions/0006-eye-to-hand-static-calibration.md) for the full
+rationale):
+- This is **eye-to-hand** calibration — the camera is fixed to the world
+  (ceiling-mounted), not to the robot flange — so `T_base_cam` is a single
+  matrix solved **once**, offline, and never recomposed per frame (contrast
+  with eye-in-hand, where the camera moves with the arm and the transform
+  would need recomposing every frame).
+- For this single, fixed robot, **base frame == world frame**, so
+  `T_base_cam` alone is enough to get a camera-frame object pose into the
+  frame the arm expects — no separate world↔base step.
+- `obj_T_grasp` exists because the **TCP must reach the grasp point, not the
+  object origin** — without it the gripper would target wherever the CAD
+  origin happens to be, not a graspable feature.
+- The pre-grasp pose backs off along the **grasp's own approach axis** (local
+  `-z`, via `NaiveTopDownGrasp._standoff`), by `grasp_approach_dist` metres
+  (env `ORCH_APPROACH_DIST`, default `0.10`).
+- Both matrices default to **identity** — a placeholder that makes real
+  grasps wrong, not a safe fallback. They drop in via the env vars above
+  with **no code change** once the arm is calibrated and CAD grasp offsets
+  are known.
+- Final grasp accuracy is bounded by the **worst link in the chain**:
+  calibration residuals, robot mastering error, and pose-estimate noise each
+  tighten (or loosen) one link independently.
 
 ## Entry points
 
@@ -136,10 +188,18 @@ contracts* so integration doesn't block on the hardware landing first:
   /move_to_pose` (4x4 base-frame pose), `POST /move_named` (named poses:
   `home`, `clearance`, `inspect_0..N`, `ok_bin`, `reject_bin`), `POST
   /gripper` (`closed`, `width?`), optional `GET /state`. Synchronous — calls
-  return only once motion completes. Default `MOVEMENT_URL=http://jetson.local:9000`.
+  return only once motion completes. As of commit `e0a1b13`, `/gripper`
+  close must additionally **block until the gripper settles/stalls** — the
+  grip-current read that follows (see next bullet) needs a steady-state, not
+  inrush, value. Default `MOVEMENT_URL=http://jetson.local:9000`.
 - [`contracts/grip_api.md`](../../contracts/grip_api.md) — `GET /grip` →
-  `{"grasped": bool}` or `{"raw": 0|1}` (either accepted), polled right after
-  gripper close. Default `GRIP_URL=http://jetson.local:9001`.
+  `{"grasped": bool, "current": float, "width"?: float, "threshold"?: float}`
+  (boolean-only `{"grasped": bool}` / `{"raw": 0|1}` still accepted), polled
+  right after gripper close. As of commit `e0a1b13`, grip sensing is
+  **motor-current-based**, not a binary pad — see
+  [ADR 0007](../Decisions/0007-grip-motor-current-sensing.md) for the
+  end-stop false-positive pitfall the contract designs around. Default
+  `GRIP_URL=http://jetson.local:9001`.
 
 Both are drafts — the note in each file is explicit that the hardware
 teammate should adjust freely and the client will follow. **Grasp planning**
@@ -160,11 +220,14 @@ implemented:
    LocateAnything's current text-query grounding. Slots in as an alternative
    `PerceptionClient.next_part` backend — no loop changes needed.
 2. **VLM grip verification** — a visual check (via the inspection or scene
-   camera) that the *correct* part was grasped, run alongside the binary
-   0/1 pressure sensor as a second opinion. The binary sensor can't
-   distinguish "gripped the wrong part" or "partial grip" from "gripped
-   correctly" — a VLM check would catch that. Would need a new
-   `GripVerifier` Protocol, ANDed with `GripSensor` inside
+   camera) that the *correct* part was grasped, run **alongside** the grip
+   sensor as a second opinion. As of commit `e0a1b13` the grip sensor itself
+   is motor-current-based (`grasped` plus analog `current`/`width`, see
+   [ADR 0007](../Decisions/0007-grip-motor-current-sensing.md)), which
+   already gives a partial-grip signal the old binary pad couldn't — but it
+   still can't distinguish "gripped the *wrong* part" from "gripped
+   correctly"; a VLM check adds that semantic/geometric judgment. Would need
+   a new `GripVerifier` Protocol, ANDed with `GripSensor` inside
    `_grasp_with_retry`. Noted in `orchestrator/README.md`, "Future" — do not
    assume any code for this exists.
 

@@ -11,7 +11,7 @@ implementation-level detail on top of those, not a duplicate of them.
 
 - [`System/architecture.md`](./System/architecture.md) — pipeline overview, per-stage service map (ports, containers, modules), what's built vs. future, test-suite summary.
 - [`System/integration_points.md`](./System/integration_points.md) — the three wire contracts (perception `/infer`, pose `/pose`, damage `/inspect`), the shared model-adapter pattern (`BasePerceptionModel` + `app_factory`), the HF weight cache mount, and the deferred-import convention that keeps tests GPU-free.
-- [`System/orchestrator.md`](./System/orchestrator.md) — the disassembly state machine (`orchestrator/`) that ties every stage together: loop states, the Protocol-based client seam (mocks vs. real HTTP), config, entry points, teammate-owned contracts, and the two not-yet-built VLM roles.
+- [`System/orchestrator.md`](./System/orchestrator.md) — the disassembly state machine (`orchestrator/`) that ties every stage together: loop states, the Protocol-based client seam (mocks vs. real HTTP), config, the hand-eye calibration + grasp chain, entry points, teammate-owned contracts (now incl. motor-current grip sensing), and the two not-yet-built VLM roles.
 
 ## Decisions — ADRs (why we chose X over Y)
 
@@ -20,6 +20,8 @@ implementation-level detail on top of those, not a duplicate of them.
 - [`Decisions/0003-damage-failsafe-sort-policy.md`](./Decisions/0003-damage-failsafe-sort-policy.md) — damage bin-sort is hardcoded server-side: only clean `ok` → `ok_bin`; `damaged` AND `uncertain` → `reject_bin` (fail-closed).
 - [`Decisions/0004-pose-contract-reuses-kip-pose-viewer.md`](./Decisions/0004-pose-contract-reuses-kip-pose-viewer.md) — the `/pose` wire contract is deliberately identical to the KIP `kip-pose-viewer` reference, so a future gateway can fan out to either estimator interchangeably.
 - [`Decisions/0005-mock-first-interface-seam-integration.md`](./Decisions/0005-mock-first-interface-seam-integration.md) — the orchestrator depends only on Protocol interfaces so the full loop runs/demos today against mocks while YOLO tuning, the Jetson movement endpoint, and the grip sensor are still in progress; real clients swap in behind the same seam.
+- [`Decisions/0006-eye-to-hand-static-calibration.md`](./Decisions/0006-eye-to-hand-static-calibration.md) — eye-to-hand (ceiling camera) calibration means `T_base_cam` is one static matrix, never recomposed per frame; the grasp chain composes it with `cam_T_obj` and `obj_T_grasp`, with explicit mm→m unit handling.
+- [`Decisions/0007-grip-motor-current-sensing.md`](./Decisions/0007-grip-motor-current-sensing.md) — grip sensing moved from a binary pad to motor current (current + width), with the end-stop false-positive pitfall documented; the `GripSensor` Protocol absorbed the change with no loop changes.
 
 ## SOP — operational runbooks
 
