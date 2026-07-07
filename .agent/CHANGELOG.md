@@ -2,6 +2,46 @@
 
 Newest first.
 
+- 2026-07-07 — Shared-token auth (`WBK_API_TOKEN`) documented as **implemented**
+  (commit `749b179`, "feat(auth): shared-token gate on work + robot
+  endpoints") — previously only anticipated as a gap in ADR 0008's
+  "Consequences". Added `Decisions/0009-shared-token-auth.md` (ADR: optional
+  bearer token via a `require_token` FastAPI dependency copy-pasted into
+  each of the four deployable packages — `perception/services/shared/auth.py`,
+  `pose/shared/auth.py`, `damage/auth.py`, `orchestrator/auth.py` —
+  unset-token = disabled; protects perception `POST /infer`, pose `POST
+  /pose`, damage `POST /inspect`, orchestrator `POST /run`/`GET /events/run`;
+  `GET /health` always open; header or `?token=` query transport, the latter
+  for browser `EventSource`; alternatives rejected — CORS as a control, IP
+  allowlisting, a real OAuth/JWT system; explicit **trusted-LAN-only** caveat
+  — blocks network-only outsiders, not same-host co-tenants who can read the
+  token from env/`.env`/`docker inspect`/`/proc`, nor a browser-embedded
+  token visible in devtools; mitigation is service placement, revisited
+  later). Extended `System/integration_points.md`: new auth bullet in the
+  shared design-conventions list, a token-requirement note under each of
+  Contracts 1–3, and the SSE contract's `?token=` transport explained under
+  Contract 4. Extended `System/orchestrator.md`: new "Auth" section
+  (`orchestrator/auth.py` enforces on `/run`+`/events/run`;
+  `OrchestratorConfig.auth_headers` attaches the same token to
+  `HttpPerception`/`HttpPose`/`HttpDamage`, explicitly **not**
+  `HttpMovement`/`HttpGrip`); entry-point bullets and the Tests section
+  updated. Extended `System/dashboard.md`: new "Auth token" section for the
+  `apiToken` runtime-config field (`lib/api.ts`'s `authHeaders()` vs.
+  `runStreamUrl()`'s `?token=`), Settings-page table row, and the Test suite
+  paragraph. Updated Python test count 86 → 105 everywhere it was cited
+  (`System/architecture.md`, `System/orchestrator.md`,
+  `SOP/running_tests.md`, incl. the previously-stale "81 tests" in that
+  SOP's `uv run pytest` comment) and added the new `test_auth.py` files (4
+  each in `tests/{perception,pose,damage}/`, 7 in `tests/orchestrator/`) —
+  plus a previously-missing `tests/orchestrator/` block — to
+  `SOP/running_tests.md`'s Layout tree. Updated frontend test count 23 → 26
+  everywhere it was cited (`System/architecture.md`, `System/dashboard.md`)
+  for the new `frontend/src/lib/api.test.ts`. Added a `WBK_API_TOKEN` auth
+  note (curl `-H` flag, opt-in default) to `SOP/running_services.md`. Added
+  ADR 0009 to the `README.md` index and to the Related-Docs cross-links in
+  `System/architecture.md`, `System/integration_points.md`,
+  `System/orchestrator.md`, `System/dashboard.md`, and
+  `SOP/running_services.md`/`SOP/running_tests.md`.
 - 2026-07-07 — Correction: frontend now has a test suite. A Vitest unit
   suite landed in `frontend/` (`npm test` → `vitest run`, jsdom env,
   `frontend/vitest.config.ts`, `src/**/*.test.ts` — 23 tests across 3 files,

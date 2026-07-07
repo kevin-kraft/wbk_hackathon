@@ -5,6 +5,7 @@
 - [System: Orchestrator](./orchestrator.md) — the `GET /events/run` SSE endpoint this app consumes, and `LoopEvent`/loop-state shapes it mirrors
 - [Integration Points & Wire Contracts](./integration_points.md) — the SSE event contract + CORS
 - [ADR 0008: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why this isn't fused into the orchestrator
+- [ADR 0009: shared-token auth](../Decisions/0009-shared-token-auth.md) — the `apiToken` field below, and why `GET /events/run` needed a query-param token transport
 - `frontend/README.md` (in-repo) — the module's own README; this doc adds the `.agent/` cross-reference layer on top, not a duplicate
 
 ## What it is
@@ -25,7 +26,7 @@ belt-and-braces on top of that, not the primary mechanism).
 `npm run build` runs `tsc -b && vite build` (type-check + bundle to `dist/`)
 and is verified clean.
 
-`npm test` runs a **Vitest** unit suite (23 tests, jsdom env,
+`npm test` runs a **Vitest** unit suite (26 tests, jsdom env,
 `frontend/vitest.config.ts`, `src/**/*.test.ts`) — see "Test suite" below.
 
 ## The four pages (`frontend/src/pages/`)
@@ -35,7 +36,7 @@ and is verified clean.
 | Dashboard | `DashboardPage.tsx` | Run controls (start/stop, dry-run toggle, pace/delay), the 7-stage pipeline tracker (`StageTracker`) driven by the *latest* live event, scene camera (`MjpegView`), grip telemetry, a next-part text prompt box, bin tallies, and the full event log. |
 | Perception | `PerceptionPage.tsx` | Scene view plus the YOLO / SAM 3 / LocateAnything endpoints and their `/health` status (detection overlays are noted as future work, not yet rendered). |
 | Inspection | `InspectionPage.tsx` | Inspection camera, the damage-VLM endpoint, a per-part OK/damaged verdicts table, and bin state. |
-| Settings | `SettingsPage.tsx` | Live-editable text fields for every service endpoint and both camera stream URLs, plus run defaults (dry-run, pace); "Save & reload" persists to `localStorage`, "Reset to config.json" clears the override. |
+| Settings | `SettingsPage.tsx` | Live-editable text fields for every service endpoint and both camera stream URLs, plus run defaults (dry-run, pace) and the shared `apiToken` (see "Auth token" below); "Save & reload" persists to `localStorage`, "Reset to config.json" clears the override. |
 
 Shared building blocks in `frontend/src/components/`: `Layout`, `StageTracker`
 (maps loop state → one of the 7 canonical stages, see `lib/stages.ts`),
@@ -79,6 +80,26 @@ trailing slash.
 `getConfig()`/`serviceUrl(key)`/`streamUrl(key)` read the already-resolved
 module-level `current` config synchronously anywhere in the app after the
 initial `loadConfig()` await.
+
+## Auth token (`apiToken`, `frontend/src/lib/api.ts`)
+
+The runtime config carries one more field, `apiToken` (`lib/types.ts`,
+default `""`, resolved through the same four-layer precedence above —
+notably `VITE_API_TOKEN` at the build-time layer and a live-editable
+"API token" field on the Settings page). It is the shared token described in
+[ADR 0009](../Decisions/0009-shared-token-auth.md), and is attached two
+different ways depending on the transport:
+
+- `authHeaders()` returns `{"Authorization": "Bearer <token>"}` (or `{}` if
+  unset) — sent on `POST /run` (`runOnce()`).
+- `runStreamUrl()` appends `&token=<token>` to the `GET /events/run` URL
+  instead, because the SSE consumer is a browser `EventSource`, which cannot
+  set request headers.
+
+Same rules as every other service: if the orchestrator has no
+`WBK_API_TOKEN` configured, an empty `apiToken` here works fine (auth is
+opt-in end to end). If the orchestrator *does* have a token configured, this
+field must match it or `POST /run`/`GET /events/run` 401.
 
 ## Consuming the orchestrator's live loop (`frontend/src/hooks/useRunStream.ts`)
 
@@ -138,12 +159,14 @@ it unit-testable without rendering:
 - `currentPart(events)` → the active part/step derived from the latest
   `LOCATE` event, consumed by `DashboardPage`.
 
-`npm test` (`vitest run`, jsdom env) runs 23 tests across 3 files:
+`npm test` (`vitest run`, jsdom env) runs 26 tests across 4 files:
 `src/lib/derive.test.ts` (12, the reducers above), `src/config/runtime.test.ts`
 (6, the four-layer endpoint-precedence resolution described above —
 localStorage > config.json > env > localhost, trailing-slash stripping,
-fetch-failure fallback), and `src/lib/stages.test.ts` (5, the
-`stateToStage` mapping described below). All passing; wired into CI as
+fetch-failure fallback), `src/lib/stages.test.ts` (5, the
+`stateToStage` mapping described below), and `src/lib/api.test.ts` (3, the
+`apiToken`/auth-token wiring above — `authHeaders()` empty vs. Bearer header,
+`runStreamUrl()` appending `?token=`). All passing; wired into CI as
 `npm test` ahead of `npm run build` in the `frontend` job of
 `.github/workflows/tests.yml` — see [System: Architecture](./architecture.md#test-suite).
 

@@ -8,6 +8,7 @@
 - [ADR: eye-to-hand static calibration + grasp chain composition](../Decisions/0006-eye-to-hand-static-calibration.md) — why `T_base_cam` is a single static matrix and how the grasp chain composes
 - [ADR: motor-current-based grip sensing](../Decisions/0007-grip-motor-current-sensing.md) — why `/grip` moved from a binary pad to analog current, and the end-stop pitfall
 - [ADR: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why the SSE endpoint below exists and why CORS is on
+- [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — why `/run`/`/events/run` are gated and why the orchestrator also attaches the token downstream
 - [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
 - [SOP: running the services](../SOP/running_services.md)
 - `orchestrator/README.md` (in-repo) — the module's own README; this doc adds the `.agent/` cross-reference layer on top, not a duplicate
@@ -105,8 +106,32 @@ Env-driven `OrchestratorConfig` dataclass: URLs for the repo's own stages
 (`MOVEMENT_URL` default `http://jetson.local:9000`, `GRIP_URL` default
 `http://jetson.local:9001`); behavior knobs `MAX_GRASP_ATTEMPTS` (default 3),
 `MAX_STEPS` (default 50, the runaway-loop bound), `INSPECTION_ANGLES`
-(default 3); and three hand-eye-calibration / grasp-geometry fields —
-`T_base_cam`, `obj_T_grasp`, `grasp_approach_dist` — described next.
+(default 3); `api_token` (env `WBK_API_TOKEN`, default empty = auth
+disabled — see "Auth" below); and three hand-eye-calibration /
+grasp-geometry fields — `T_base_cam`, `obj_T_grasp`, `grasp_approach_dist` —
+described next.
+
+## Auth (`orchestrator/auth.py`, `orchestrator/config.py`)
+
+The orchestrator is **both enforcer and caller** for the shared-token auth
+scheme (see [ADR 0009](../Decisions/0009-shared-token-auth.md)):
+
+- **Enforcer**: `POST /run` and `GET /events/run` (see "Entry points" below)
+  carry `dependencies=[Depends(require_token)]` — `orchestrator/auth.py`'s
+  `require_token`, the same ~35-line dependency copy-pasted into
+  perception/pose/damage. Checks `WBK_API_TOKEN`; unset = no-op, so
+  dry-run/tests/mocks are unaffected.
+- **Caller**: `OrchestratorConfig.auth_headers` (a property, `config.py`)
+  returns `{"Authorization": f"Bearer {api_token}"}` when `api_token` is set,
+  else `{}`. `HttpPerception`, `HttpPose`, and `HttpDamage` (`clients/http_*.py`)
+  each construct their `httpx.Client(headers=config.auth_headers)` with this
+  — every outbound call to perception/pose/damage carries the same token the
+  orchestrator itself requires. **`HttpMovement`/`HttpGrip` do not** — the
+  teammate-owned Jetson endpoints are out of scope for this auth layer (see
+  ADR 0009).
+- One env var (`WBK_API_TOKEN`) has to match across every service instance
+  for a real (non-dry-run) deployment; `docker-compose.yml` and the
+  `deploy/*/.env.example` files pass it through to every container.
 
 ## Hand-eye calibration & the grasp chain (`orchestrator/config.py`, `orchestrator/clients/naive_grasp.py`, commit `6994503`)
 
@@ -163,10 +188,12 @@ rationale):
   integration while teammate-owned pieces are still in progress. See
   [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md).
 - **`orchestrator.app:app`** (`orchestrator/app.py`, FastAPI, port `:8000`) —
-  `GET /health`; `POST /run?dry_run=true|false` builds an orchestrator via
-  `build_orchestrator()` and returns `{"stats": ..., "events": [...]}`. This
-  is what `docker-compose.yml`'s `orchestrator` service runs in production
-  (`dry_run=false` against the live containers + Jetson endpoints).
+  `GET /health` (open, no token); `POST /run?dry_run=true|false` builds an
+  orchestrator via `build_orchestrator()` and returns `{"stats": ...,
+  "events": [...]}`. This is what `docker-compose.yml`'s `orchestrator`
+  service runs in production (`dry_run=false` against the live containers +
+  Jetson endpoints). Gated by `Depends(require_token)` when `WBK_API_TOKEN`
+  is set — see "Auth" above.
 - **`GET /events/run?dry_run=<bool>&delay=<seconds>`** (`orchestrator/app.py`,
   added alongside the dashboard) — the same loop, but **streamed** as
   Server-Sent Events instead of collected into one response: this is what the
@@ -184,7 +211,11 @@ rationale):
   a terminal `end` frame that closes the stream. See
   [Integration Points](./integration_points.md) for the exact SSE format.
   `POST /run` is unchanged and still exists as the non-streaming variant (a
-  scripted smoke test, e.g., doesn't need SSE parsing).
+  scripted smoke test, e.g., doesn't need SSE parsing). Also gated by
+  `Depends(require_token)`; since a browser `EventSource` can't set headers,
+  this is the endpoint that motivated the `?token=` query-param transport
+  alongside the `Authorization: Bearer` header — see "Auth" above and
+  [ADR 0009](../Decisions/0009-shared-token-auth.md).
 - **CORS**: `app.py` adds `CORSMiddleware` with `allow_origins=["*"]`,
   `allow_credentials=False` — required because the dashboard is a separate
   origin (see [ADR 0008](../Decisions/0008-frontend-separate-static-app.md)).
@@ -276,6 +307,13 @@ implemented:
 required): full disassembly + correct bin sort, the rectify-retry path fires
 on a failed grip read, a damaged part routes to `reject_bin`, an ungraspable
 part is blacklisted and the loop stops cleanly (not a runaway), and the loop
-terminates within `max_steps`. Suite total is now **86** (see
-[Architecture](./architecture.md) and
-[SOP: running the tests](../SOP/running_tests.md)).
+terminates within `max_steps`.
+
+[`tests/orchestrator/test_auth.py`](../../tests/orchestrator/test_auth.py) —
+7 tests covering `require_token` wired onto `POST /run`/`GET /events/run`:
+disabled when `WBK_API_TOKEN` unset, 401 on missing/wrong token, accepted via
+both the `Authorization: Bearer` header and the `?token=` query param,
+`GET /health` stays open regardless. Mirrored by 4-test `test_auth.py` files
+in each of `tests/{damage,perception,pose}/` for their own `require_token`
+copies. Suite total is now **105** (see [Architecture](./architecture.md)
+and [SOP: running the tests](../SOP/running_tests.md)).

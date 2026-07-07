@@ -24,6 +24,7 @@ implementation-level detail on top of those, not a duplicate of them.
 - [`Decisions/0006-eye-to-hand-static-calibration.md`](./Decisions/0006-eye-to-hand-static-calibration.md) — eye-to-hand (ceiling camera) calibration means `T_base_cam` is one static matrix, never recomposed per frame; the grasp chain composes it with `cam_T_obj` and `obj_T_grasp`, with explicit mm→m unit handling.
 - [`Decisions/0007-grip-motor-current-sensing.md`](./Decisions/0007-grip-motor-current-sensing.md) — grip sensing moved from a binary pad to motor current (current + width), with the end-stop false-positive pitfall documented; the `GripSensor` Protocol absorbed the change with no loop changes.
 - [`Decisions/0008-frontend-separate-static-app.md`](./Decisions/0008-frontend-separate-static-app.md) — the dashboard (`frontend/`) is a separate static app, not fused into the orchestrator: the orchestrator must run headless/CI-testable, the dashboard must be re-pointable per-host; the only coupling is the read-only `/events/run` SSE stream.
+- [`Decisions/0009-shared-token-auth.md`](./Decisions/0009-shared-token-auth.md) — optional `WBK_API_TOKEN` bearer token gating every work/robot `POST` endpoint (header or `?token=` for SSE); trusted-LAN anti-spam only, explicit co-tenant/browser caveats and why real auth was rejected.
 
 ## SOP — operational runbooks
 

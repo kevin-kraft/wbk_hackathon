@@ -3,13 +3,14 @@
 ## Related Docs
 - [Architecture](../System/architecture.md) — test suite summary
 - [Integration Points](../System/integration_points.md) — why deferred imports let this suite run without GPU/torch
+- [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — what the `test_auth.py` files below cover
 - [SOP: running the services](./running_services.md)
 
 ## Run
 
 ```bash
 uv sync            # installs the light dev deps (pytest, pillow, numpy, opencv-python-headless, pydantic, fastapi, httpx) into .venv
-uv run pytest      # whole suite (81 tests as of this scan)
+uv run pytest      # whole suite (105 tests as of this scan)
 uv run pytest -q tests/damage   # just one module's tests
 ```
 
@@ -66,15 +67,21 @@ tests/
     test_schemas.py                services/shared/schemas.py request defaults
     test_locateanything_parse.py   LocateAnythingBackend._parse() token parser
     test_app_smoke.py              FastAPI TestClient smoke tests (model mocked)
+    test_auth.py                   services/shared/auth.py require_token (4 tests)
   pose/
     test_imaging.py                shared/imaging.py (rgb/depth/mask/K decode)
     test_schemas.py                 shared/schemas.py `class`-alias round trip
     test_app_smoke.py              FastAPI TestClient smoke tests (runner mocked)
+    test_auth.py                   shared/auth.py require_token (4 tests)
   damage/
     test_client.py                  client._extract_json + call_openrouter errors
     test_prompts.py                 prompts.build_messages ordering/shape
     test_reference.py               reference.load_reference disk loader
     test_app.py                     /inspect bin-sorting policy (call_openrouter mocked)
+    test_auth.py                    auth.py require_token (4 tests)
+  orchestrator/
+    test_loop.py                    full disassembly loop against mocks (5 tests)
+    test_auth.py                    auth.py require_token on /run + /events/run (7 tests)
 ```
 
 ## What's intentionally NOT covered

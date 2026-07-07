@@ -6,6 +6,7 @@
 - [System: Orchestrator](../System/orchestrator.md) — the state machine that drives all of these services together
 - [ADR: perception shared container vs. pose split containers](../Decisions/0001-perception-shared-container-pose-split-containers.md)
 - [ADR: pose contract reuses kip-pose-viewer](../Decisions/0004-pose-contract-reuses-kip-pose-viewer.md)
+- [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — the optional `WBK_API_TOKEN` referenced below
 - [SOP: running the tests](./running_tests.md)
 - [SOP: running the orchestrator dry-run](./running_orchestrator_dry_run.md) — run the full loop with no services/GPU/hardware at all
 
@@ -143,3 +144,12 @@ Exposes `GET /health` and `GET /docs` (OpenAPI UI) in addition to its `POST`
 route. Use `/health` to confirm a model finished loading
 (`{"status":"ok", "loaded": true, ...}`) before sending real traffic — startup
 can take a while for the larger perception/pose models.
+
+**Auth (optional).** Set `WBK_API_TOKEN` (same value on every service +
+the orchestrator) to require it on the `POST` work routes — see
+[ADR 0009](../Decisions/0009-shared-token-auth.md). `docker-compose.yml` and
+every `deploy/*/.env.example` already pass `WBK_API_TOKEN` through; leave it
+unset for local/dev work (the default, and what the smoke-test `curl`
+commands above assume). With it set, add `-H "Authorization: Bearer
+$WBK_API_TOKEN"` to any of the `curl` smoke tests above, or the service
+401s.

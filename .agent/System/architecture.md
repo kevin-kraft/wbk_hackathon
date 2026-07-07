@@ -10,6 +10,7 @@
 - [ADR: pose contract reuses kip-pose-viewer](../Decisions/0004-pose-contract-reuses-kip-pose-viewer.md)
 - [ADR: mock-first, interface-seam integration](../Decisions/0005-mock-first-interface-seam-integration.md) — how the orchestrator runs the full loop today against mocks for teammate-owned pieces
 - [ADR: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why the UI isn't fused into the orchestrator
+- [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — the optional `WBK_API_TOKEN` gate on every work endpoint
 - [SOP: running the services](../SOP/running_services.md)
 - [SOP: running the tests](../SOP/running_tests.md)
 - [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
@@ -191,29 +192,35 @@ As of the orchestrator addition (`3abc923`, 2026-07-07):
 
 ## Test suite
 
-86 pytest tests (`tests/`), up from 81 before the orchestrator: 81 covering
-pure logic in perception/pose/damage (schemas, image/tensor codecs, the
-LocateAnything token parser, prompt building, the damage bin policy, FastAPI
-route wiring with model adapters mocked) plus 5 in
-`tests/orchestrator/test_loop.py` running the full disassembly loop
-end-to-end against mocks (rectify-retry, reject-bin routing, blacklisting an
-ungraspable part, bounded termination). No GPU, no model weights, no
-`OPENROUTER_API_KEY`, no network, no hardware. See
+105 pytest tests (`tests/`), up from 86 before the shared-token auth layer:
+86 covering pure logic in perception/pose/damage (schemas, image/tensor
+codecs, the LocateAnything token parser, prompt building, the damage bin
+policy, FastAPI route wiring with model adapters mocked) plus the full
+disassembly loop end-to-end against mocks (rectify-retry, reject-bin
+routing, blacklisting an ungraspable part, bounded termination), plus 19 new
+`test_auth.py` tests (7 in `tests/orchestrator/`, 4 each in
+`tests/{damage,perception,pose}/`) covering the `require_token` dependency —
+disabled when `WBK_API_TOKEN` unset, 401 on missing/wrong token, accepted
+via header or `?token=` query param, `/health` always open — see
+[ADR 0009](../Decisions/0009-shared-token-auth.md). No GPU, no model
+weights, no `OPENROUTER_API_KEY`, no network, no hardware. See
 [SOP: running the tests](../SOP/running_tests.md) for the conftest.py
 per-stage import-root subtlety and what's intentionally NOT covered
 (`*.load()`/`*.infer()`/`*.estimate()` on all five real model adapters). This
-count is Python-only. `frontend/` has its own **Vitest** unit suite — 23
-tests across 3 files (`npm test` → `vitest run`, jsdom env,
+count is Python-only. `frontend/` has its own **Vitest** unit suite — 26
+tests across 4 files (`npm test` → `vitest run`, jsdom env,
 `frontend/vitest.config.ts`), covering `config/runtime.ts`'s endpoint
-precedence resolution, `lib/stages.ts`'s state→stage mapping, and the
+precedence resolution, `lib/stages.ts`'s state→stage mapping, the
 event-reducer logic in `lib/derive.ts` (`tallyBins`, `deriveInspections`,
-`deriveGrip`, `currentPart`) — see [System: Dashboard](./dashboard.md) for
+`deriveGrip`, `currentPart`), and the `apiToken` auth-header/query-param
+wiring in `lib/api.ts` — see [System: Dashboard](./dashboard.md) for
 detail. `npm run build` (`tsc -b && vite build`) remains the type-check +
 production-bundle gate on top of that.
 
 CI: `.github/workflows/tests.yml` has two jobs. `pytest` runs `uv sync
---frozen && uv run pytest -q` (86 tests). `frontend` runs `npm ci`, then
-`npm test` (the 23-test Vitest suite), then `npm run build` — so unit tests,
+--frozen && uv run pytest -q` (105 tests). `frontend` runs `npm ci`, then
+`npm test` (the 26-test Vitest suite), then `npm run build` — so unit tests,
 type-check, and build all gate every push/PR to `main`. Green as of
 `7cf5211` ("Add GitHub Actions CI to run tests on push/PR to main"),
-extended to cover the frontend suite once Vitest landed.
+extended to cover the frontend suite once Vitest landed, and again for the
+shared-token auth tests.

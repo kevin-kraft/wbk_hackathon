@@ -6,6 +6,7 @@
 - [System: Dashboard](./dashboard.md) — the SSE contract's consumer (`useRunStream`)
 - [ADR: pose contract reuses kip-pose-viewer](../Decisions/0004-pose-contract-reuses-kip-pose-viewer.md)
 - [ADR: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why SSE + CORS exist at all
+- [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — why every `POST` contract below is gated, the threat model, and its limits
 - [SOP: running the services](../SOP/running_services.md)
 
 This doc covers the things a change to *any* stage is likely to touch: the
@@ -32,6 +33,16 @@ here also breaks the orchestrator's HTTP clients
 - **Independently containerizable.** Every service directory is self-contained
   (own `model.py`, `app.py`/`main.py`, `requirements.txt`) so it can be
   extracted into its own container without touching siblings.
+- **Optional shared-token auth on the work endpoint.** Every `POST /infer` /
+  `/pose` / `/inspect` route (plus the orchestrator's `/run` and
+  `/events/run`, contract 4 below) carries `dependencies=[Depends(require_token)]`
+  — a `require_token` FastAPI dependency copy-pasted into each package
+  (`perception/services/shared/auth.py`, `pose/shared/auth.py`,
+  `damage/auth.py`, `orchestrator/auth.py`, identical logic). It checks the
+  request against env `WBK_API_TOKEN`; **unset = disabled**, so
+  dev/CI/mocks/dry-run need no token. `GET /health` (and `/`) are always
+  open. See [ADR 0009](../Decisions/0009-shared-token-auth.md) for the
+  design and its trusted-LAN-only threat model.
 
 ## Contract 1 — Perception `POST /infer`
 
@@ -54,6 +65,10 @@ planning, when it exists) does not need to branch on which model produced it.
 
 Every perception service also exposes `GET /health` → `HealthResponse{status,
 service, model, device, loaded}` and `GET /` (info) and `GET /docs` (OpenAPI).
+
+`POST /infer` requires `WBK_API_TOKEN` (`Authorization: Bearer <token>`) when
+that env var is set on the service — see [ADR 0009](../Decisions/0009-shared-token-auth.md).
+`GET /health`/`/`/`/docs` stay open regardless.
 
 ## Contract 2 — Pose `POST /pose`
 
@@ -81,6 +96,11 @@ GigaPose only; `stage` (`'coarse'|'refined'|'refined+kabsch'`) is GigaPose-only
 too — FoundationPose leaves both `null`.
 
 `GET /health` → `PoseHealth{status, service, model, device, loaded, classes}`.
+
+`POST /pose` requires `WBK_API_TOKEN` when set on the service (same
+`require_token` dependency as perception) — see
+[ADR 0009](../Decisions/0009-shared-token-auth.md). `GET /health` stays
+open.
 
 Fragile bits carried over from the KIP reference (see `pose/README.md`):
 depth must be **metric uint16 mm** exactly (GigaPose does subtle mm↔m handling
@@ -110,6 +130,11 @@ and why it lives there instead of trusting the model's own bin choice.
 `GET /health` → `DamageHealth{status, service, model, api_key_present,
 reference_dir}`.
 
+`POST /inspect` requires `WBK_API_TOKEN` when set on the service (same
+`require_token` dependency as the other two stages) — see
+[ADR 0009](../Decisions/0009-shared-token-auth.md). `GET /health` stays
+open.
+
 ## Contract 4 — Orchestrator live loop `GET /events/run` (SSE)
 
 Defined in `orchestrator/app.py`. This is the one contract in the repo that
@@ -124,6 +149,14 @@ Request: `GET /events/run?dry_run=<bool>&delay=<seconds>` — `dry_run`
 `delay` (default `0.0`) sleeps that many seconds after each emitted event, in
 the server-side worker thread, to pace the stream for a watchable demo
 (mocks otherwise finish in milliseconds).
+
+Both `POST /run` and `GET /events/run` require `WBK_API_TOKEN` when set (see
+[ADR 0009](../Decisions/0009-shared-token-auth.md)). `GET /events/run` is
+the reason the token transport has a query-param form at all:
+`?token=<token>` alongside `dry_run`/`delay`, because a browser
+`EventSource` (the dashboard's SSE client) cannot set an `Authorization`
+header — `POST /run` also accepts the query form but normally uses the
+header instead.
 
 Response: `Content-Type: text/event-stream`, `Cache-Control: no-cache`,
 `Connection: keep-alive`, `X-Accel-Buffering: no` (disables proxy buffering
