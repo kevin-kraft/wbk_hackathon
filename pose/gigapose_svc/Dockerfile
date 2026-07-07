@@ -11,8 +11,10 @@
 ARG BASE_IMAGE=gigapose:blackwell
 FROM ${BASE_IMAGE}
 
+# Constrain numpy<2 in the SAME install: fastapi/opencv otherwise pull numpy 2.x,
+# which breaks the base's numpy-1 ABI stack (pinocchio/MegaPose compiled for 1.x).
 RUN /opt/venv/bin/pip install --no-cache-dir \
-        fastapi "uvicorn[standard]" pydantic python-multipart opencv-python-headless
+        fastapi "uvicorn[standard]" pydantic python-multipart opencv-python-headless "numpy<2"
 
 WORKDIR /svc
 COPY shared /svc/shared
