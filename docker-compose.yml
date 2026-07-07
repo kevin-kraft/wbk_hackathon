@@ -26,6 +26,19 @@ services:
       - MOVEMENT_URL=${MOVEMENT_URL:-http://jetson.local:9000}
       - GRIP_URL=${GRIP_URL:-http://jetson.local:9001}
 
+  # --- Dashboard: operator console + live demo UI (static, nginx) ---
+  # config.json is mounted (not baked) so you can re-point endpoints per-machine
+  # without rebuilding. Edit ./frontend/public/config.json and reload the browser.
+  dashboard:
+    build:
+      context: ./frontend
+    image: wbk-dashboard:latest
+    container_name: wbk-dashboard
+    ports:
+      - "5173:80"
+    volumes:
+      - ./frontend/public/config.json:/usr/share/nginx/html/config.json:ro
+
   # --- Perception: YOLO + SAM3 + LocateAnything in one container ---
   perception:
     build:

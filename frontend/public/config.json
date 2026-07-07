@@ -1,0 +1,22 @@
+{
+  "_comment": "Runtime endpoint config. Edit this file on the DEPLOYED machine to point the dashboard at wherever each microservice actually lives — no rebuild needed. Each service can be on a different host. The Settings page can override any of these live (stored in the browser). Precedence: Settings-page override > this file > build-time VITE_* defaults > localhost.",
+  "services": {
+    "orchestrator": "http://localhost:8000",
+    "yolo": "http://localhost:8001",
+    "sam3": "http://localhost:8002",
+    "locateanything": "http://localhost:8003",
+    "foundationpose": "http://localhost:8004",
+    "gigapose": "http://localhost:8005",
+    "damage": "http://localhost:8006",
+    "movement": "http://jetson.local:9000",
+    "grip": "http://jetson.local:9001"
+  },
+  "streams": {
+    "sceneCamera": "http://localhost:8080/stream.mjpg",
+    "inspectionCamera": ""
+  },
+  "run": {
+    "dryRun": true,
+    "stepDelayMs": 700
+  }
+}

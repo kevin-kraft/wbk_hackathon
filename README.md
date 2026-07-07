@@ -42,6 +42,7 @@ the Jetson movement endpoint, the grip sensor).
 | **Movement (arm)** | — | Jetson endpoint (teammate) | — | 🔧 in progress · [contract](contracts/movement_api.md) |
 | **Grip detection** | — | pressure sensor (teammate) | — | 🔧 in progress · [contract](contracts/grip_api.md) |
 | **Damage inspection** | `damage/` | damage `8006` | CPU | ✅ scaffolded |
+| **Dashboard (UI)** | `frontend/` | dashboard `5173` | — | ✅ built (live SSE) |
 
 ### Orchestrator (`orchestrator/`)
 The disassembly state machine that ties every stage together: locate next part →
@@ -74,6 +75,16 @@ The arm holds a removed part to an inspection webcam; multi-angle shots go to
 known-damaged references and returns `{verdict, damaged, confidence, bin, …}`.
 Only a clean `ok` → `ok_bin`; `damaged`/`uncertain` → `reject_bin`.
 
+### Dashboard (`frontend/`)
+A **separate static app** (React + Vite + Tailwind) that is the operator console
+and live demo UI — it is deliberately *not* fused with the orchestrator (which
+must run headless). It streams the loop from the orchestrator's SSE endpoint
+(`GET /events/run`) and renders the 7-stage pipeline with the live REGRASP retry,
+scene/inspection cameras, grip telemetry, damage verdicts, and bin tallies.
+**Every service endpoint is runtime-configurable** (`frontend/public/config.json`,
+editable per-machine with no rebuild), so services can be spread across hosts.
+Works today against mocks — see [`frontend/README.md`](frontend/README.md).
+
 ## Quick start
 
 ```bash
@@ -85,9 +96,14 @@ docker compose up --build foundationpose gigapose
 
 # Damage inspection (CPU)
 OPENROUTER_API_KEY=sk-or-... docker compose up --build damage
+
+# Dashboard UI (static; edit frontend/public/config.json to point at your hosts)
+docker compose up --build dashboard        # http://localhost:5173
 ```
 
 Each service exposes `GET /health`, `GET /docs` (OpenAPI), and its `POST` route.
+The orchestrator additionally streams the live loop over `GET /events/run` (SSE),
+which the dashboard consumes.
 
 ## Future (from the task spec — noted, not yet built)
 
@@ -103,10 +119,11 @@ Each service exposes `GET /health`, `GET /docs` (OpenAPI), and its `POST` route.
 ## Repo layout
 
 ```
-orchestrator/ disassembly state machine + stage clients (CPU coordinator)
+orchestrator/ disassembly state machine + stage clients + SSE stream (CPU coordinator)
 perception/   YOLO + SAM3 + LocateAnything   (1 GPU container)
 pose/         FoundationPose + GigaPose       (2 GPU containers)
 damage/       OpenRouter VLM damage inspection (CPU)
+frontend/     operator console + live demo dashboard (React/Vite static app)
 contracts/    proposed Jetson-movement + grip-sensor APIs (hand-off to teammates)
 docs/         architecture.md
 docker-compose.yml
@@ -114,7 +131,7 @@ docker-compose.yml
 
 Per-stage detail: [`orchestrator/README.md`](orchestrator/README.md) ·
 [`perception/README.md`](perception/README.md) · [`pose/README.md`](pose/README.md) ·
-[`damage/README.md`](damage/README.md).
+[`damage/README.md`](damage/README.md) · [`frontend/README.md`](frontend/README.md).
 
 ## Status
 
