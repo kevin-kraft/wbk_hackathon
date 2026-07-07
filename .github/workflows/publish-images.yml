@@ -26,6 +26,8 @@ jobs:
             context: orchestrator
           - name: damage
             context: damage
+          - name: robot-control
+            context: robot_control
           - name: dashboard
             context: frontend
     steps:

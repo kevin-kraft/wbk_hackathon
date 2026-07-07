@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter
 
-from shared.jetson import RobotCommand
+from app.schemas import RobotCommand
 from app.robot_socket_client import robot_socket_client
 
 

@@ -103,6 +103,23 @@ services:
       - ${GIGAPOSE_REPO:-~/code/GigaPose}:/workspace/GigaPose
     deploy: *gpu
 
+  # --- Robot control (movement): Jetson-side bridge to the LARA5 robot (CPU) ---
+  # Fills the orchestrator's MOVEMENT_URL slot. In a real deploy this runs ON the
+  # Jetson next to the robot socket server; ROBOT_HOST/ROBOT_PORT point at it.
+  robot_control:
+    build:
+      context: ./robot_control
+    image: wbk-robot-control:latest
+    container_name: wbk-robot-control
+    ports:
+      - "9000:9000"
+    environment:
+      - ROBOT_HOST=${ROBOT_HOST:-127.0.0.1}
+      - ROBOT_PORT=${ROBOT_PORT:-65432}
+      - KIP_API_BASE=${KIP_API_BASE:-https://max-utils.com/KIP/api}
+      - ALLOW_RAW_ROBOT_COMMANDS=${ALLOW_RAW_ROBOT_COMMANDS:-true}
+      - WBK_API_TOKEN=${WBK_API_TOKEN:-}
+
   # --- Damage inspection: OpenRouter VLM (CPU) ---
   damage:
     build:

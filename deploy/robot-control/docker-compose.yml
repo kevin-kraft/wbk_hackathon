@@ -1,0 +1,14 @@
+# Standalone deploy of the robot-control (movement) bridge. Runs ON the Jetson
+# next to the LARA5 robot socket server. Copy this file (+ a filled .env) to the
+# Jetson; no repo clone needed.  docker compose pull && docker compose up -d
+services:
+  robot-control:
+    image: ghcr.io/kevin-kraft/wbk-robot-control:latest
+    container_name: wbk-robot-control
+    # Host networking so the container can reach the robot socket server on the
+    # Jetson's localhost (ROBOT_HOST=127.0.0.1). Drop this and publish "9000:9000"
+    # instead if the robot server is on another host.
+    network_mode: host
+    env_file:
+      - .env
+    restart: unless-stopped

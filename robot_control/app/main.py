@@ -1,15 +1,19 @@
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
-from app import env 
+from app import env
+from app.auth import require_token
 from app.routers import commands, joint_states, robot_commands, robot_workflows
 
 app = FastAPI(title="LARA5 Jetson Bridge")
 
-app.include_router(commands.router)
-app.include_router(joint_states.router)
-app.include_router(robot_commands.router)
-app.include_router(robot_workflows.router)
+# Shared-token auth on every router (no-op unless WBK_API_TOKEN is set); /health
+# below stays open for monitoring.
+_auth = [Depends(require_token)]
+app.include_router(commands.router, dependencies=_auth)
+app.include_router(joint_states.router, dependencies=_auth)
+app.include_router(robot_commands.router, dependencies=_auth)
+app.include_router(robot_workflows.router, dependencies=_auth)
 
 @app.get("/health")
 def health():
