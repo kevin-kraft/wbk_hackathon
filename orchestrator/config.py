@@ -61,6 +61,9 @@ class OrchestratorConfig:
     perception_locate_url: str = field(default_factory=lambda: os.getenv("PERCEPTION_LOCATE_URL", "http://localhost:8003"))
     pose_url: str = field(default_factory=lambda: os.getenv("POSE_URL", "http://localhost:8004"))  # foundationpose
     damage_url: str = field(default_factory=lambda: os.getenv("DAMAGE_URL", "http://localhost:8006"))
+    # Scene RGB-D camera (Zivid) capture service. Empty = use the file/static
+    # stand-in (StaticSceneCamera) instead of the HTTP client.
+    scene_camera_url: str = field(default_factory=lambda: os.getenv("SCENE_CAMERA_URL", ""))
 
     # --- teammate-owned endpoints (see contracts/) ---
     movement_url: str = field(default_factory=lambda: os.getenv("MOVEMENT_URL", "http://jetson.local:9000"))

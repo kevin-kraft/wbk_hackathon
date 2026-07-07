@@ -1,0 +1,11 @@
+# Scene-camera capture service deps (CPU). The Zivid SDK is NOT listed here:
+# `zivid` is hardware/platform-specific (Jetson = ARM64) and is installed on the
+# Jetson per Zivid's own instructions (SDK + camera on USB3/GigE). The mock/file
+# backends run without it, so the service (and its tests) build anywhere.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+numpy>=1.26
+opencv-python-headless>=4.9
+
+# On the Jetson, additionally:  pip install zivid   (matching the installed Zivid SDK)

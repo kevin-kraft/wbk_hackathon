@@ -1,0 +1,19 @@
+# Standalone deploy of the scene-camera (Zivid) capture service. Runs ON the
+# Jetson where the Zivid is connected. Copy this file (+ a filled .env) there.
+#
+# The real `zivid` backend needs the Zivid SDK and USB access — often simpler to
+# run natively in the Jetson's Zivid venv than in Docker. If you do use Docker,
+# pass the camera through (--device / privileged) and build an image that has the
+# Zivid SDK + `pip install zivid` for the Jetson's arch.
+services:
+  scene-camera:
+    image: ghcr.io/kevin-kraft/wbk-scene-camera:latest
+    container_name: wbk-scene-camera
+    network_mode: host           # serve :9002 on the Jetson
+    # Pass the Zivid through for the real backend:
+    # privileged: true
+    # volumes:
+    #   - /dev/bus/usb:/dev/bus/usb
+    env_file:
+      - .env
+    restart: unless-stopped

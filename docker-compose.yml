@@ -103,6 +103,23 @@ services:
       - ${GIGAPOSE_REPO:-~/code/GigaPose}:/workspace/GigaPose
     deploy: *gpu
 
+  # --- Scene camera (Zivid) capture service: RGB-D for perception + pose ---
+  # Runs ON the Jetson (where the Zivid is connected). The real `zivid` backend
+  # needs the SDK + USB passthrough; `mock`/`file` backends run anywhere. Fills
+  # the orchestrator's SceneCamera seam via SCENE_CAMERA_URL.
+  scene_camera:
+    build:
+      context: ./scene_camera
+    image: wbk-scene-camera:latest
+    container_name: wbk-scene-camera
+    ports:
+      - "9002:9002"
+    environment:
+      - SCENE_CAMERA_BACKEND=${SCENE_CAMERA_BACKEND:-mock}
+      - ZIVID_SETTINGS_PATH=${ZIVID_SETTINGS_PATH:-}
+      - SCENE_K=${SCENE_K:-}
+      - WBK_API_TOKEN=${WBK_API_TOKEN:-}
+
   # --- Robot control (movement): Jetson-side bridge to the LARA5 robot (CPU) ---
   # Fills the orchestrator's MOVEMENT_URL slot. In a real deploy this runs ON the
   # Jetson next to the robot socket server; ROBOT_HOST/ROBOT_PORT point at it.

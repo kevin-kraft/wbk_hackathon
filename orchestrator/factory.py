@@ -44,12 +44,18 @@ def build_orchestrator(
 
     import json
 
-    scene_k = json.loads(os.environ["SCENE_K"]) if os.getenv("SCENE_K") else None
-    scene = StaticSceneCamera(
-        rgb_path=os.getenv("SCENE_RGB_PATH", "scene_rgb.png"),
-        depth_path=os.getenv("SCENE_DEPTH_PATH") or None,
-        K=scene_k,  # flat-9 intrinsics; required by the pose stage
-    )
+    if config.scene_camera_url:
+        # Real Zivid capture service (see scene_camera/); satisfies SceneCamera.
+        from .clients.http_scene import HttpSceneCamera
+
+        scene = HttpSceneCamera(config)
+    else:
+        scene_k = json.loads(os.environ["SCENE_K"]) if os.getenv("SCENE_K") else None
+        scene = StaticSceneCamera(
+            rgb_path=os.getenv("SCENE_RGB_PATH", "scene_rgb.png"),
+            depth_path=os.getenv("SCENE_DEPTH_PATH") or None,
+            K=scene_k,  # flat-9 intrinsics; required by the pose stage
+        )
     return DisassemblyOrchestrator(
         scene_camera=scene,
         perception=HttpPerception(config),
