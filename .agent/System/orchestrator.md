@@ -201,6 +201,19 @@ contracts* so integration doesn't block on the hardware landing first:
   end-stop false-positive pitfall the contract designs around. Default
   `GRIP_URL=http://jetson.local:9001`.
 
+**REST approach confirmed (2026-07-07).** A hardware teammate confirmed the
+robot-arm movement/grip control interface will be an **HTTP-adapter
+microservice that wraps NeuraPy** (NEURA's Python SDK), to be uploaded to
+this repo shortly. This had been in doubt: an earlier inspection of the
+Jetson controller found it running NeuraPy with no REST API of its own —
+only a read-only joint-state TCP publisher on `:5005` and a localhost MJPEG
+stream — which cast doubt on whether `HttpMovement`/`HttpGrip`'s REST
+contracts were the right shape. That doubt is now resolved: the existing
+`orchestrator/clients/http_movement.py`/`http_grip.py` clients and
+`contracts/movement_api.md`/`contracts/grip_api.md` stay the integration
+target and will be aligned to the adapter microservice's actual routes once
+it lands.
+
 Both are drafts — the note in each file is explicit that the hardware
 teammate should adjust freely and the client will follow. **Grasp planning**
 itself (`NaiveTopDownGrasp`) is also explicitly a placeholder, not a

@@ -78,6 +78,15 @@ complete end-to-end today.
   start in parallel with hardware work, at the cost that the contracts may
   still shift once the hardware teammates push back — the `Http*` clients
   will need to track that if/when it happens.
+- **Update (2026-07-07):** the REST-contract bet paid off — a hardware
+  teammate confirmed the movement/grip interface will be an HTTP-adapter
+  microservice wrapping NeuraPy (NEURA's SDK), landing in this repo shortly.
+  An earlier inspection of the Jetson controller had found NeuraPy exposed
+  with no REST API of its own, which had cast doubt on the `HttpMovement`/
+  `HttpGrip` approach; that doubt is now resolved and the existing clients/
+  contracts remain the integration target. See
+  [System: Orchestrator](../System/orchestrator.md) "Teammate-owned
+  contracts" for the detail.
 - **The naive grasp planner and the two external endpoints are known,
   tracked placeholders** — see [System: Orchestrator](../System/orchestrator.md)
   "Teammate-owned contracts" and "Not yet built" in
