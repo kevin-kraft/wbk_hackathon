@@ -78,6 +78,11 @@ Each service is intentionally self-contained (own `model.py`, `main.py`,
 
 - **yolo** — Ultralytics YOLO, ready to run.
 - **sam3** — Meta SAM 3 via `transformers` (`facebook/sam3`). Text/concept prompts
-  and point/box prompts both wired. Weights are **gated** — `hf auth login` first.
+  and point/box prompts both wired. Weights are gated on HuggingFace but are
+  **already cached locally** on this machine, so the service loads them offline.
 - **locateanything** — NVIDIA `LocateAnything-3B` via `trust_remote_code`. Text
-  query → boxes/points; scores are rank-derived (no native confidence).
+  query → boxes/points; scores are rank-derived (no native confidence). Weights
+  **pre-fetched** into the local HF cache — loads offline.
+
+Both caches live in `~/.cache/huggingface`, which `docker-compose.yml` mounts
+into the container.

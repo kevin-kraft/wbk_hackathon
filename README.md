@@ -2,6 +2,8 @@
 
 WBK Hackathon Group · 2026-07-07
 
+[![tests](https://github.com/kevin-kraft/wbk_hackathon/actions/workflows/tests.yml/badge.svg)](https://github.com/kevin-kraft/wbk_hackathon/actions/workflows/tests.yml)
+
 ## Goal
 
 A robot arm that **disassembles a part step by step**, guided by vision models in
@@ -92,6 +94,20 @@ FastAPI route wiring with model adapters mocked). See [`tests/README.md`](tests/
 uv sync            # installs the light test-only deps (pytest, pillow, numpy, ...)
 uv run pytest      # whole suite
 ```
+
+**CI:** `.github/workflows/tests.yml` runs the suite (`uv sync --frozen && uv run
+pytest`) on every push and PR to `main` — see the badge above.
+
+## Model weights
+
+Both perception VLMs load **offline** from the local HuggingFace cache
+(`~/.cache/huggingface`, mounted into the container by `docker-compose.yml`):
+
+- **SAM 3** (`facebook/sam3`) — already cached.
+- **LocateAnything-3B** (`nvidia/LocateAnything-3B`) — pre-fetched (~7.3 GB).
+
+YOLO weights auto-download on first use. Pose meshes/templates and the damage
+service's `OPENROUTER_API_KEY` are supplied per the module READMEs.
 
 ## Status
 

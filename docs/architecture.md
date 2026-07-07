@@ -116,6 +116,16 @@ only a clean `ok` → `ok_bin`; `damaged` and `uncertain` → `reject_bin`. Deta
 perception/   YOLO + SAM3 + LocateAnything (1 GPU container, supervisord)
 pose/         FoundationPose + GigaPose (2 GPU containers)
 damage/       OpenRouter VLM damage inspection (CPU)
+tests/        pytest suite (GPU/network-free, heavy layers mocked)
 docs/         this file
 docker-compose.yml   all stages as services
+.github/workflows/tests.yml   CI: uv run pytest on push/PR to main
 ```
+
+## CI & tests
+
+The `tests/` suite runs the pure logic across all three stages (schemas, image
+codecs, the LocateAnything token parser, damage bin policy, FastAPI route wiring)
+with the heavy model/network layers mocked — no GPU, weights, or network needed.
+`.github/workflows/tests.yml` runs it (`uv sync --frozen && uv run pytest`) on
+every push and PR to `main`.
