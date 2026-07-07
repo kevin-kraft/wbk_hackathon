@@ -1,6 +1,9 @@
 # CUDA + torch base — torch/torchvision ship with the image at a matching CUDA
 # version, which sidesteps the usual GPU-wheel pain for ultralytics / SAM / etc.
-FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+# Override for newer GPUs: Blackwell (sm_120) needs CUDA 12.8+/torch 2.7+, e.g.
+#   --build-arg BASE_IMAGE=pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
+ARG BASE_IMAGE=pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+FROM ${BASE_IMAGE}
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
