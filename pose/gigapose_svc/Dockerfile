@@ -3,10 +3,13 @@
 # numpy<2. Build that base first from ~/code/GigaPose/docker/Dockerfile.blackwell:
 #   docker build -t gigapose:blackwell -f docker/Dockerfile.blackwell .
 # (Retag for your GPU arch — the reference base targets Blackwell / sm_120.)
+# Override for another GPU arch, e.g. RTX 5000 Ada (sm_89):
+#   --build-arg BASE_IMAGE=gigapose:ada   (base built with TORCH_CUDA_ARCH_LIST=8.9)
 #
-# NOTE: this is a SEPARATE image from foundationpose:blackwell on purpose — the
-# two stacks disagree on numpy / xformers / panda3d and cannot co-exist.
-FROM gigapose:blackwell
+# NOTE: this is a SEPARATE image from foundationpose:* on purpose — the two
+# stacks disagree on numpy / xformers / panda3d and cannot co-exist.
+ARG BASE_IMAGE=gigapose:blackwell
+FROM ${BASE_IMAGE}
 
 RUN /opt/venv/bin/pip install --no-cache-dir \
         fastapi "uvicorn[standard]" pydantic python-multipart opencv-python-headless

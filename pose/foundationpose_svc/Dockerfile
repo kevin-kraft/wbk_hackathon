@@ -3,7 +3,10 @@
 # Build that base first from ~/code/FoundationPose/docker/Dockerfile.blackwell:
 #   docker build -t foundationpose:blackwell -f docker/Dockerfile.blackwell .
 # (Retag for your GPU arch — the reference base targets Blackwell / sm_120.)
-FROM foundationpose:blackwell
+# Override for another GPU arch, e.g. RTX 5000 Ada (sm_89):
+#   --build-arg BASE_IMAGE=foundationpose:ada   (base built with TORCH_CUDA_ARCH_LIST=8.9)
+ARG BASE_IMAGE=foundationpose:blackwell
+FROM ${BASE_IMAGE}
 
 # The base image installs into /opt/venv.
 RUN /opt/venv/bin/pip install --no-cache-dir \
