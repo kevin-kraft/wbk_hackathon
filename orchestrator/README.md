@@ -90,6 +90,32 @@ Two VLM roles the challenge calls for, with clean seams already in place:
 Also future: a real grasp-planning module (replacing `NaiveTopDownGrasp`) and an
 RGB-D scene-camera client.
 
+## Hand-eye calibration
+
+The grasp chain converts a camera-frame object pose to a robot-base grasp pose:
+
+```
+base_T_grasp = T_base_cam · cam_T_obj · obj_T_grasp
+```
+
+- `cam_T_obj` — object pose from the pose stage (camera frame, metres).
+- **`T_base_cam`** — the hand-eye extrinsic, **eye-to-hand** (camera fixed to the
+  world / ceiling), so a single **static** 4×4 solved once by calibration — never
+  recomposed per frame. Supply it as `T_BASE_CAM` (flat-16 row-major JSON,
+  `base←camera`). If your calibration outputs mm (e.g. Zivid), set
+  `T_BASE_CAM_UNITS=mm` and it's converted to metres to match the pose stage.
+  Until provided it defaults to **identity**, which makes grasps wrong.
+- `obj_T_grasp` — grasp offset in the object frame (from CAD / the grasp planner),
+  via `T_OBJ_GRASP`; defaults to identity (grasp at the object origin).
+
+These are SE(3) matrix compositions (`@`), not element-wise. For a single fixed
+robot the base frame *is* the world frame, so `T_base_cam` is all that's needed.
+Final grasp accuracy is bounded by the worst link in the chain (calibration
+residuals, robot mastering, and pose-estimate noise each tighten one link).
+
+Calibration matrices will be provided after the arm is calibrated; they drop into
+`T_BASE_CAM` / `T_OBJ_GRASP` with no code change.
+
 ## Layout
 
 ```

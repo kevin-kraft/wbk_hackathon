@@ -2,7 +2,7 @@
 
 Service URLs cover our own stages (perception/pose/damage) plus the two
 teammate-owned endpoints (Jetson movement, grip sensor) whose contracts are
-proposed in `contracts/`.
+proposed in `contracts/`. Also holds the hand-eye calibration + grasp geometry.
 """
 
 from __future__ import annotations
@@ -14,6 +14,26 @@ from dataclasses import dataclass, field
 
 def _identity4x4() -> list[list[float]]:
     return [[1.0 if i == j else 0.0 for j in range(4)] for i in range(4)]
+
+
+def _load_matrix(env_name: str, units_env: str | None = None) -> list[list[float]]:
+    """Load a 4x4 transform from a flat-16 row-major JSON env var (identity if unset).
+
+    If `units_env` resolves to "mm", the translation column is converted to
+    metres — the pose stage emits metres, so a mm extrinsic (e.g. straight from
+    Zivid hand-eye calibration) must be scaled before composing with it.
+    """
+    raw = os.getenv(env_name)
+    if not raw:
+        return _identity4x4()
+    flat = [float(x) for x in json.loads(raw)]
+    if len(flat) != 16:
+        raise ValueError(f"{env_name} must be 16 numbers (flat 4x4 row-major), got {len(flat)}")
+    matrix = [flat[i : i + 4] for i in range(0, 16, 4)]
+    if units_env and os.getenv(units_env, "m").lower() == "mm":
+        for r in range(3):
+            matrix[r][3] /= 1000.0
+    return matrix
 
 
 @dataclass
@@ -36,15 +56,15 @@ class OrchestratorConfig:
     inspection_angles: int = field(default_factory=lambda: int(os.getenv("INSPECTION_ANGLES", "3")))
     http_timeout_s: float = field(default_factory=lambda: float(os.getenv("ORCH_HTTP_TIMEOUT_S", "120")))
 
-    # camera->base extrinsics for grasp planning (flat 16 row-major JSON); identity default.
-    T_base_cam: list[list[float]] = field(
-        default_factory=lambda: (
-            [row for row in _chunk(json.loads(os.environ["T_BASE_CAM"]), 4)]
-            if os.getenv("T_BASE_CAM")
-            else _identity4x4()
-        )
-    )
-
-
-def _chunk(flat: list[float], n: int) -> list[list[float]]:
-    return [flat[i : i + n] for i in range(0, len(flat), n)]
+    # --- hand-eye calibration + grasp geometry ---
+    # base<-camera extrinsics: eye-to-hand (camera fixed to the world), so a single
+    # STATIC matrix — never recomposed per frame. Supply via T_BASE_CAM as flat-16
+    # row-major JSON (base<-camera). Set T_BASE_CAM_UNITS=mm if the calibration
+    # output translation is in mm (e.g. Zivid); it is converted to metres.
+    # Provided after calibration; identity is a placeholder that makes grasps wrong.
+    T_base_cam: list[list[float]] = field(default_factory=lambda: _load_matrix("T_BASE_CAM", "T_BASE_CAM_UNITS"))
+    # Grasp offset in the OBJECT frame (obj->grasp), from CAD / the grasp planner.
+    # Full runtime chain: base_T_grasp = T_base_cam @ cam_T_obj @ obj_T_grasp.
+    obj_T_grasp: list[list[float]] = field(default_factory=lambda: _load_matrix("T_OBJ_GRASP", "T_OBJ_GRASP_UNITS"))
+    # Pre-grasp stand-off distance (metres) along the grasp approach axis.
+    grasp_approach_dist: float = field(default_factory=lambda: float(os.getenv("ORCH_APPROACH_DIST", "0.10")))
