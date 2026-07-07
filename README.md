@@ -116,32 +116,6 @@ Per-stage detail: [`orchestrator/README.md`](orchestrator/README.md) ·
 [`perception/README.md`](perception/README.md) · [`pose/README.md`](pose/README.md) ·
 [`damage/README.md`](damage/README.md).
 
-## Tests
-
-Fast, GPU/network-free unit tests for the pure logic across all modules
-(perception/pose/damage schemas + codecs, the LocateAnything token parser, damage
-bin policy, and the full orchestrator loop run end-to-end on mocks). See
-[`tests/README.md`](tests/README.md).
-
-```bash
-uv sync            # installs the light test-only deps (pytest, pillow, numpy, ...)
-uv run pytest      # whole suite
-```
-
-**CI:** `.github/workflows/tests.yml` runs the suite (`uv sync --frozen && uv run
-pytest`) on every push and PR to `main` — see the badge above.
-
-## Model weights
-
-Both perception VLMs load **offline** from the local HuggingFace cache
-(`~/.cache/huggingface`, mounted into the container by `docker-compose.yml`):
-
-- **SAM 3** (`facebook/sam3`) — already cached.
-- **LocateAnything-3B** (`nvidia/LocateAnything-3B`) — pre-fetched (~7.3 GB).
-
-YOLO weights auto-download on first use. Pose meshes/templates and the damage
-service's `OPENROUTER_API_KEY` are supplied per the module READMEs.
-
 ## Status
 
 Hackathon build (2026-07-07). Perception, 6DoF pose, and damage-inspection stages
