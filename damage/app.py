@@ -9,6 +9,7 @@ tells the arm where to place the part: `ok_bin` or `reject_bin`.
 from __future__ import annotations
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .auth import require_token
@@ -20,6 +21,15 @@ from .schemas import DamageHealth, DamageRequest, DamageVerdict
 
 settings = Settings()
 app = FastAPI(title="damage-inspection")
+
+# Let the dashboard poll /health + call /inspect from the browser (auth still applies).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health", response_model=DamageHealth)

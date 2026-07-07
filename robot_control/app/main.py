@@ -1,10 +1,20 @@
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app import env
 from app.auth import require_token
 from app.routers import commands, joint_states, robot_commands, robot_workflows
 
 app = FastAPI(title="LARA5 Jetson Bridge")
+
+# Let the dashboard poll /health from the browser (auth still gates the routes).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Shared-token auth on every router (no-op unless WBK_API_TOKEN is set); /health
 # below stays open for monitoring.

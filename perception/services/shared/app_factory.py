@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .model_base import BasePerceptionModel
@@ -22,6 +23,16 @@ def create_service_app(*, service_name: str, model: BasePerceptionModel) -> Fast
         model.unload()
 
     app = FastAPI(title=f"perception-{service_name}", lifespan=lifespan)
+
+    # Allow the dashboard (served from another origin) to poll /health and call
+    # /infer from the browser. Token auth still gates the routes.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
