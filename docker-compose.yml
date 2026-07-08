@@ -21,6 +21,8 @@ services:
       - PERCEPTION_SAM3_URL=http://perception:8002
       - PERCEPTION_LOCATE_URL=http://perception:8003
       - POSE_URL=http://foundationpose:8004
+      # GigaPose — used for pose_pipeline=rgb/2d (2d = CAD-free planar pose).
+      - GIGAPOSE_URL=http://gigapose:8005
       - DAMAGE_URL=http://damage:8006
       # Teammate-owned endpoints (external Jetson) — set to real hosts:
       - MOVEMENT_URL=${MOVEMENT_URL:-http://jetson.local:9000}

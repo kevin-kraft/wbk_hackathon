@@ -60,6 +60,21 @@ class OrchestratorConfig:
     perception_sam3_url: str = field(default_factory=lambda: os.getenv("PERCEPTION_SAM3_URL", "http://localhost:8002"))
     perception_locate_url: str = field(default_factory=lambda: os.getenv("PERCEPTION_LOCATE_URL", "http://localhost:8003"))
     pose_url: str = field(default_factory=lambda: os.getenv("POSE_URL", "http://localhost:8004"))  # foundationpose
+    # GigaPose endpoint — used for the CAD-free 'pipeline=2d' planar pose (which
+    # FoundationPose does not implement). Falls back to pose_url if unset.
+    gigapose_url: str = field(default_factory=lambda: os.getenv("GIGAPOSE_URL", "http://localhost:8005"))
+    # Pose pipeline for the loop's /pose calls:
+    #   "rgbd" — 6DoF with depth (default, -> pose_url / FoundationPose)
+    #   "rgb"  — 6DoF RGB-only  (-> gigapose_url)
+    #   "2d"   — CAD-free planar pose from the mask (-> gigapose_url). No templates
+    #            needed; robust top-down/planar picking. See pose/shared/planar.py.
+    # Overridable per-run via /run?pose_pipeline= (no restart needed).
+    pose_pipeline: str = field(default_factory=lambda: os.getenv("POSE_PIPELINE", "rgbd").strip().lower())
+    # Camera-frame table depth (m) for pose_pipeline='2d' when per-mask depth is
+    # absent. None -> the pose service's built-in default.
+    pose_plane_z: float | None = field(
+        default_factory=lambda: (float(os.environ["POSE_PLANE_Z"]) if os.getenv("POSE_PLANE_Z") else None)
+    )
     damage_url: str = field(default_factory=lambda: os.getenv("DAMAGE_URL", "http://localhost:8006"))
     # Scene RGB-D camera (Zivid) capture service. Empty = use the file/static
     # stand-in (StaticSceneCamera) instead of the HTTP client.

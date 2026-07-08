@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { RobotTarget, RuntimeConfig, ServiceKey, StreamKey } from "../lib/types";
+import type { PosePipeline, RobotTarget, RuntimeConfig, ServiceKey, StreamKey } from "../lib/types";
 import { getConfig, saveOverrides, clearOverrides, getOverrides, SERVICE_KEYS, STREAM_KEYS } from "../config/runtime";
 import { Card } from "../components/ui";
 
@@ -128,6 +128,20 @@ export default function SettingsPage() {
               <option value="real">Real (Jetson arm)</option>
               <option value="sim">Sim (simulator only)</option>
               <option value="both">Both (real + sim twin)</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-zinc-300">
+            Pose
+            <select
+              value={cfg.run.posePipeline}
+              onChange={(e) =>
+                setCfg((c) => ({ ...c, run: { ...c.run, posePipeline: e.target.value as PosePipeline } }))
+              }
+              className="rounded-lg border border-zinc-700 bg-zinc-950/60 px-2 py-1 text-xs text-zinc-200 focus:border-sky-500 focus:outline-none"
+            >
+              <option value="rgbd">6DoF (FoundationPose, depth)</option>
+              <option value="rgb">6DoF·RGB (GigaPose)</option>
+              <option value="2d">2D planar (GigaPose, CAD-free)</option>
             </select>
           </label>
         </div>

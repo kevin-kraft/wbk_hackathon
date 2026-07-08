@@ -16,13 +16,21 @@ class HttpPose:
     def estimate(self, frame: SceneFrame, part: PartDetection) -> Pose:
         if not part.mask_b64:
             raise ValueError("pose estimation needs a segmentation mask on the part")
+        pipeline = (self.c.pose_pipeline or "rgbd").lower()
         payload = {
             "rgb_b64": frame.rgb_b64,
             "depth_b64": frame.depth_b64,
             "K": frame.K,
+            "pipeline": pipeline,
             "instances": [{"id": part.id, "class": part.class_name, "mask_b64": part.mask_b64}],
         }
-        r = self._http.post(f"{self.c.pose_url}/pose", json=payload)
+        if pipeline == "2d" and self.c.pose_plane_z is not None:
+            payload["plane_z"] = self.c.pose_plane_z
+        # '2d'/'rgb' are GigaPose-only pipelines; 'rgbd' stays on the default
+        # pose service (FoundationPose). gigapose_url falls back to pose_url.
+        url = self.c.gigapose_url if pipeline in ("2d", "rgb") else self.c.pose_url
+        url = url or self.c.pose_url
+        r = self._http.post(f"{url}/pose", json=payload)
         r.raise_for_status()
         poses = r.json().get("poses", [])
         if not poses:

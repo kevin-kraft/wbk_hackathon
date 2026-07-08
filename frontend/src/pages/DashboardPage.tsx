@@ -56,6 +56,8 @@ export default function DashboardPage() {
           onDelay={run.setDelayMs}
           robotTarget={run.robotTarget}
           onRobotTarget={run.setRobotTarget}
+          posePipeline={run.posePipeline}
+          onPosePipeline={run.setPosePipeline}
           simAvailable={simAvailable}
           activeTarget={run.activeTarget}
           onStart={() =>
@@ -64,6 +66,7 @@ export default function DashboardPage() {
               run.delayMs / 1000,
               run.dryRun ? undefined : run.robotTarget,
               run.product || undefined,
+              run.dryRun ? undefined : run.posePipeline,
             )
           }
           onStop={run.stop}

@@ -28,12 +28,14 @@ from .models import LoopEvent
 app = FastAPI(title="orchestrator")
 
 
-def _config_for(target: str | None) -> OrchestratorConfig:
-    """Base env config, with the robot target optionally overridden per-run so the
-    dashboard can flip real/sim/both without restarting the service."""
+def _config_for(target: str | None, pose_pipeline: str | None = None) -> OrchestratorConfig:
+    """Base env config, with the robot target + pose pipeline optionally overridden
+    per-run so the dashboard can flip real/sim/both or 6DoF/2D without restarting."""
     config = OrchestratorConfig()
     if target:
         config.robot_target = target.strip().lower()
+    if pose_pipeline:
+        config.pose_pipeline = pose_pipeline.strip().lower()
     return config
 
 # The dashboard is a separate static app that may be served from any host, so it
@@ -58,19 +60,32 @@ def health() -> dict:
 
 
 @app.post("/run", dependencies=[Depends(require_token)])
-def run(dry_run: bool = False, target: str | None = None, product: str | None = None) -> dict:
+def run(
+    dry_run: bool = False,
+    target: str | None = None,
+    product: str | None = None,
+    pose_pipeline: str | None = None,
+) -> dict:
     """Run a full loop and return all events + the final stats at once (no streaming).
 
     `target` (real|sim|both) picks which robot the loop drives, overriding
     ROBOT_TARGET for this run only. `product` switches to a plan-driven run:
     the PlanProvider generates an ordered disassembly plan for that product and
     the loop executes it step by step (see GET /products for the choices).
+    `pose_pipeline` (rgbd|rgb|2d) overrides the pose stage for this run — '2d' is
+    the CAD-free planar pose (GigaPose), useful when 6DoF templates are missing.
     """
     events: list[dict] = []
-    config = _config_for(target)
+    config = _config_for(target, pose_pipeline)
     orchestrator = build_orchestrator(config=config, dry_run=dry_run, on_event=lambda e: events.append(_event_dict(e)))
     stats = orchestrator.run(product=product)
-    return {"stats": stats, "target": config.robot_target, "product": product, "events": events}
+    return {
+        "stats": stats,
+        "target": config.robot_target,
+        "product": product,
+        "pose_pipeline": config.pose_pipeline,
+        "events": events,
+    }
 
 
 @app.get("/products", dependencies=[Depends(require_token)])
@@ -129,7 +144,8 @@ def _sse(data: dict, event: str | None = None) -> str:
 
 @app.get("/events/run", dependencies=[Depends(require_token)])
 async def events_run(
-    dry_run: bool = False, delay: float = 0.0, target: str | None = None, product: str | None = None
+    dry_run: bool = False, delay: float = 0.0, target: str | None = None, product: str | None = None,
+    pose_pipeline: str | None = None,
 ) -> StreamingResponse:
     """Run a loop and stream each stage event as it happens (SSE).
 
@@ -142,7 +158,7 @@ async def events_run(
     """
     q: queue.Queue = queue.Queue()
     sentinel = object()
-    config = _config_for(target)
+    config = _config_for(target, pose_pipeline)
 
     def on_event(event: LoopEvent) -> None:
         q.put(("event", _event_dict(event)))

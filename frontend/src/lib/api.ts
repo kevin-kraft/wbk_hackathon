@@ -5,6 +5,7 @@ import type {
   HealthStatus,
   LocateResponse,
   PlanPreview,
+  PosePipeline,
   RobotTarget,
   Sam3Response,
   SceneCapture,
@@ -56,11 +57,13 @@ export async function runOnce(
   dryRun: boolean,
   target?: RobotTarget,
   product?: string,
+  posePipeline?: PosePipeline,
 ): Promise<{ stats: Record<string, number>; target?: string; events: unknown[] }> {
   const base = serviceUrl("orchestrator");
   let url = `${base}/run?dry_run=${dryRun}`;
   if (target) url += `&target=${target}`;
   if (product) url += `&product=${encodeURIComponent(product)}`;
+  if (posePipeline) url += `&pose_pipeline=${posePipeline}`;
   const res = await fetch(url, { method: "POST", headers: authHeaders() });
   if (!res.ok) throw new Error(`run failed: HTTP ${res.status}`);
   return res.json();
@@ -74,12 +77,14 @@ export function runStreamUrl(
   delaySeconds: number,
   target?: RobotTarget,
   product?: string,
+  posePipeline?: PosePipeline,
 ): string {
   const base = serviceUrl("orchestrator");
   const delay = Math.max(0, delaySeconds);
   let url = `${base}/events/run?dry_run=${dryRun}&delay=${delay}`;
   if (target) url += `&target=${target}`;
   if (product) url += `&product=${encodeURIComponent(product)}`;
+  if (posePipeline) url += `&pose_pipeline=${posePipeline}`;
   const t = apiToken();
   if (t) url += `&token=${encodeURIComponent(t)}`;
   return url;
