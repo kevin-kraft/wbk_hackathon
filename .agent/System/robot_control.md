@@ -165,8 +165,10 @@ The `deploy/robot-control/docker-compose.yml` path above is **not** how this
 service actually runs on the lab's Jetson (`lara5@172.22.192.166`, ssh alias
 `jetson`) today. It is deployed instead as a plain `python3 -m venv` process
 under `nohup`, alongside `scene_camera/` (the Zivid RGB-D capture service —
-port `9002`, not otherwise documented in `System/` yet). Two infra gaps
-block the documented compose path on this specific device:
+port `9002`, not otherwise documented in `System/` yet beyond this pointer;
+`scene_camera/imaging.py` gained gray-world white balance on its RGB output
+2026-07-08, see [ADR 0017](../Decisions/0017-grayworld-white-balance-sim-to-real.md)).
+Two infra gaps block the documented compose path on this specific device:
 
 1. The published GHCR image is **amd64-only** — `publish-images.yml` has no
    `platforms:` key on its `docker/build-push-action@v6` step — but the

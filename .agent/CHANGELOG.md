@@ -2,6 +2,92 @@
 
 Newest first.
 
+- 2026-07-08 — Perception debugging session + durable GPU-server redeploy
+  captured (commits `fcc2773`, `2485997`, `7f12f41` — these landed *after*
+  the previous capture entry below despite predating it in this changelog's
+  reading order; the previous capture task's scope didn't cover them).
+  **Sim-to-real fixes (`fcc2773`):** gray-world white balance on the Zivid
+  RGB (`scene_camera/imaging.py:white_balance_grayworld`,
+  `SCENE_WHITE_BALANCE=grayworld` default, zivid-backend only) — channel
+  means shifted ~R106/G109/B82 → R94/G92/B96 on a captured frame; YOLO-Det
+  went from 0 boxes @0.25 conf to a `buerstenhalter_tray` detection @0.93
+  (and, on a separate frame per the commit message, 0→3 boxes @0.94/0.79).
+  Frontend detection default conf lowered 0.25→0.10 (`runYolo()`/
+  `runYoloSeg()`, `frontend/src/lib/api.ts`) as a companion stopgap for the
+  same gap. Added `Decisions/0017-grayworld-white-balance-sim-to-real.md`
+  (ADR: both changes, why gray-world is sufficient for this rig, why lower
+  conf is a stopgap not a fix, the still-open durable fix — fine-tuning on
+  real labelled frames, no dataset exists yet). **Two bug fixes found in the
+  same debugging pass:** `locateanything`'s `.generate()` call was missing
+  `use_cache=True`, which the custom `nvidia/LocateAnything-3B` model's own
+  `generate()` asserts — every `/infer` 500'd
+  (`perception/services/locateanything/model.py`); and the shared
+  `app_factory.py` catch-all exception handler runs in Starlette's
+  `ServerErrorMiddleware`, above the CORS middleware, so its 500 responses
+  never carried `Access-Control-Allow-Origin` — the browser reported an
+  opaque network error instead of an inspectable HTTP 500, which is what
+  made the `locateanything` bug harder to diagnose than a normal 500. Both
+  fixed; documented as gotcha paragraphs (not ADRs — bug fixes, not
+  decisions with alternatives) in `System/architecture.md` (Stage 1
+  Perception) and `System/integration_points.md` (the model-adapter
+  pattern section). **Also in `fcc2773`:** SAM3/LocateAnything's `anker`
+  part prompt corrected from the German name `"anker"` (0 masks — didn't
+  match either open-vocab model's training distribution) to the English
+  open-vocab concept `"copper part"` (12 masks) — `frontend/src/lib/parts.ts`;
+  documented in `System/dashboard.md`'s PartSelector bullet.
+  **Pose pipeline exposed as a run option (`2485997`):** closes the wiring
+  gap [ADR 0016](./Decisions/0016-gigapose-2d-planar-pose-mode.md) flagged
+  as still-open — `OrchestratorConfig` gained `pose_pipeline` (env
+  `POSE_PIPELINE`, default `rgbd`) and `gigapose_url` (env `GIGAPOSE_URL`);
+  `HttpPose.estimate()` now sends `pipeline` (+ `plane_z` for `2d`) and
+  routes `2d`/`rgb` to `gigapose_url`, `rgbd` to `pose_url`; `POST /run` and
+  `GET /events/run` take a new `pose_pipeline` query param (per-run
+  override, same shape as `?target=`), echoed back in the `/run` response.
+  Dashboard: a new Pose selector in `RunControls` (6DoF / 6DoF·RGB / 2D), a
+  persisted default in Settings → Run defaults, threaded through
+  `RunContext` → `useRunStream` → `runStreamUrl` as `&pose_pipeline=`; new
+  `PosePipeline` type (`lib/types.ts`); dry runs omit the param (mocks).
+  `docker-compose.yml`/`docker-compose.remote-gpu.yml` gained `GIGAPOSE_URL`
+  wiring. Added an "Update" section to ADR 0016 documenting the closed gap.
+  Added a new "Pose pipeline selection" section to `System/orchestrator.md`
+  (mirroring the existing "Robot target selection" section) and a new "Pose
+  pipeline selector" section to `System/dashboard.md`; updated both docs'
+  Config/Entry-points/Related-Docs and the four-pages/Settings-row
+  descriptions. Updated `System/architecture.md`'s Stage 2 `pipeline='2d'`
+  paragraph and "Not yet built" (the orchestrator-wiring bullet is now
+  "real-robot grasp success unverified", not "not wired at all") and
+  `System/integration_points.md`'s Contract 2 paragraph accordingly.
+  **Durable `wbk-perception` redeploy (`7f12f41`):** the running
+  `wbk-perception` container had baked-in code (hotfixed via ephemeral
+  `docker cp`, lost on any recreate), `--restart no` (doesn't survive a
+  reboot), and a redundant `sam3` process wasting GPU memory alongside the
+  already-working standalone `wbk-sam3`. `deploy/perception/redeploy-wbk-perception.sh`
+  (+ `deploy/perception/README.md`) recreates it durably: canonical source
+  bind-mounted from `/mnt/vss-data/kip/perception` (same tree
+  `wbk-yoloseg` already uses), `--restart unless-stopped`, a dedicated
+  `supervisord.wbk-perception.conf` running only `yolo`+`locateanything`
+  (written onto the canonical source), and a `supervisorctl` control socket
+  so either program restarts independently
+  (`docker exec wbk-perception supervisorctl -c
+  .../supervisord.wbk-perception.conf restart locateanything`). Idempotent;
+  sanity-checks the canonical source carries the `use_cache`/CORS fixes
+  before proceeding. Added `Decisions/0018-durable-wbk-perception-redeploy.md`
+  (ADR: the three problems, why bind-mount+restart-policy+trimmed-config+
+  control-socket, rejected full-image-rebuild alternative, consequences —
+  now only two services, canonical-source parity with `wbk-yoloseg`).
+  Rewrote `SOP/deploy_perception_gpu_server.md`'s container topology
+  section (dedicated config, bind-mounted source, restart policy) and added
+  a new "Redeploying `wbk-perception`" section with the script invocation
+  and the no-rebuild code-update procedure; added a clarifying note on the
+  HF-cache mount's actual server-side path
+  (`/mnt/vss-data/kip/weights/hf-cache`). **No new test coverage** for any
+  of the three commits (204 pytest / 30 Vitest counts unchanged) — all
+  verification was manual against the live rig/deployed services; noted
+  explicitly in `System/architecture.md`'s Test suite section. Updated
+  `README.md`'s `System/architecture.md`, `System/integration_points.md`,
+  `System/orchestrator.md`, `System/dashboard.md`, and
+  `SOP/deploy_perception_gpu_server.md` one-liners; added ADR 0017 and ADR
+  0018 to the Decisions index.
 - 2026-07-08 — GigaPose gains a CAD-free 2D (planar) pose mode (commit
   `79f9ffa`, deploy script `f2a5da8`), and a mask-encoding bug that was
   blanking YOLO-Seg masks got fixed (commit `4b6d1d3`). **2D pose mode:**

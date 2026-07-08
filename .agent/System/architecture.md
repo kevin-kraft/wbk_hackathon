@@ -23,8 +23,10 @@
 - [ADR 0012: mask-derived detection labels](../Decisions/0012-mask-derived-detection-labels.md) — why YOLO detection training uses `--task detmask` instead of the `bbox_2d` annotator
 - [ADR 0013: AMP disabled on the Blackwell training stack](../Decisions/0013-amp-disabled-blackwell-training.md)
 - [ADR 0014: robot target selection (real \| sim \| both)](../Decisions/0014-robot-target-real-sim-both.md) — driving the Isaac Sim digital twin instead of/alongside the real arm, and why sim is a mirror, not a peer
-- [ADR 0016: GigaPose 2D (planar) pose mode](../Decisions/0016-gigapose-2d-planar-pose-mode.md) — CAD-free, model-free pose from a mask, why it exists, and the graceful-degrade startup change
+- [ADR 0016: GigaPose 2D (planar) pose mode](../Decisions/0016-gigapose-2d-planar-pose-mode.md) — CAD-free, model-free pose from a mask, why it exists, and the graceful-degrade startup change (now wired into the orchestrator, see the ADR's 2026-07-08 update)
 - [SOP: deploying the pose services (podman)](../SOP/deploy_pose_podman.md) — the `wbk-gigapose`/`wbk-foundationpose` podman deployment (distinct from perception's docker deployment), required auth, and the no-CAD-templates reality
+- [ADR 0017: gray-world white balance + lowered detection confidence](../Decisions/0017-grayworld-white-balance-sim-to-real.md) — the sim-to-real fixes found debugging the live rig, and the durable-fix caveat (fine-tuning on real data, still open)
+- [ADR 0018: durable `wbk-perception` redeploy](../Decisions/0018-durable-wbk-perception-redeploy.md) — bind-mounted source, restart policy, trimmed supervisord config for the GPU-server deployment
 - `contracts/simulation_api.md` / `contracts/sim_scene_capture.md` — the Isaac Sim command-bus surface, and the (draft, unimplemented) sim scene-capture contract
 
 ## What this is
@@ -232,6 +234,23 @@ normalized to `[0,1000]`, not JSON. There is no native per-instance confidence
 `perception/services/locateanything/model.py` derives a rank-based pseudo-score
 from Parallel Box Decoding order.
 
+**Gotcha, fixed 2026-07-08 (commit `fcc2773`):** `LocateAnythingBackend`'s
+`.generate()` call omitted `use_cache=True`, which the custom
+`nvidia/LocateAnything-3B` model's own `generate()` implementation asserts —
+every `POST /infer` against `locateanything` 500'd. Compounding this: the
+shared `app_factory.py` exception handler for a bare `Exception` runs in
+Starlette's `ServerErrorMiddleware`, **above** the CORS middleware in the
+stack, so its 500 response never carried an `Access-Control-Allow-Origin`
+header — the browser reported it as an opaque network error, not an HTTP
+500, which is what made this take longer to diagnose than a normal 500
+would have. Both are fixed: `use_cache=True` is now passed
+(`perception/services/locateanything/model.py`), and the handler
+(`perception/services/shared/app_factory.py:create_service_app`) now adds
+`Access-Control-Allow-Origin: *` to every error response it returns, so
+future service-side 500s surface as real HTTP 500s in the browser instead
+of a CORS-blocked network error. See [System: Integration
+Points](./integration_points.md) for the shared-handler detail.
+
 Runtime import root: `perception/` itself (`uvicorn services.<name>.main:app`,
 cwd=`/app/perception` per the Dockerfile/supervisord). See
 [`tests/conftest.py`](../../tests/conftest.py) for why this matters for tests.
@@ -287,11 +306,20 @@ entirely. See [SOP: deploying the pose services
 [System: Integration Points](./integration_points.md) Contract 2 for the
 full request/response shape.
 
-The orchestrator does **not** yet call `pipeline='2d'` — `HttpPose` never
-sets a `pipeline` field, so it always gets `PoseRequest`'s default
-(`'rgbd'`), and `pose_url` defaults to FoundationPose, not GigaPose. Wiring
-the loop to use the 2D mode (the only currently-working real-part pose path
-on the deployed server) is follow-up work — see "Not yet built" below.
+**Wired into the orchestrator 2026-07-08 (commit `2485997`):** `HttpPose`
+now sends `pipeline` (default `rgbd`, from `OrchestratorConfig.pose_pipeline`
+/ env `POSE_PIPELINE`) and routes `2d`/`rgb` requests to a dedicated
+`gigapose_url` instead of the FoundationPose-default `pose_url`. Overridable
+per-run via `POST /run?pose_pipeline=` / `GET /events/run?pose_pipeline=`
+(no restart needed), with a matching Pose selector in the dashboard's
+`RunControls` — see [System: Orchestrator](./orchestrator.md) "Pose pipeline
+selection" and [System: Dashboard](./dashboard.md). An operator can now
+select `2D` end-to-end to get a real pose against real parts on the
+currently-deployed GigaPose instance (which has no CAD templates for
+`rgb`/`rgbd`). Real-robot grasp success using 2D-mode poses through the full
+loop is still unverified — this closes the wiring gap only, see [ADR
+0016](../Decisions/0016-gigapose-2d-planar-pose-mode.md)'s 2026-07-08
+update.
 
 Both services build on top of **pre-built GPU base images** (`foundationpose:blackwell`,
 `gigapose:blackwell`) that must be compiled from the model repos first — see
@@ -378,19 +406,35 @@ As of the orchestrator addition (`3abc923`, 2026-07-07):
   built-in table and `deploy/sim_named_poses.example.json` are rough
   placeholders, not measured teach points (see
   [System: Orchestrator](./orchestrator.md) "Robot target selection").
-- **Orchestrator wiring for GigaPose `pipeline='2d'`** — the CAD-free planar
-  pose mode (see "Stage 2 — 6DoF Pose" above and [ADR
-  0016](../Decisions/0016-gigapose-2d-planar-pose-mode.md)) exists and is
-  verified against real masks, but `HttpPose`/`OrchestratorConfig` don't call
-  it yet: `pose_url` defaults to FoundationPose and `HttpPose.estimate()`
-  never sets `pipeline`, so it always requests the default `'rgbd'`. Since
-  the deployed GigaPose has no CAD templates (`classes: []`), the loop
-  cannot currently get a real pose from either service against real parts —
-  wiring the loop to call GigaPose with `pipeline='2d'` is the follow-up
-  needed to close that gap. See [SOP: deploying the pose services
+- **Real-robot grasp success using GigaPose `pipeline='2d'`** — the CAD-free
+  planar pose mode (see "Stage 2 — 6DoF Pose" above and [ADR
+  0016](../Decisions/0016-gigapose-2d-planar-pose-mode.md)) is now wired
+  into the orchestrator end-to-end (`pose_pipeline='2d'`, see [System:
+  Orchestrator](./orchestrator.md) "Pose pipeline selection", shipped
+  2026-07-08 commit `2485997`) and verified pose-service-side against real
+  masks, but a full real-robot pick using a 2D-mode pose through the loop
+  (grasp planning → movement → grip confirmation) has not been evaluated
+  end-to-end. See [SOP: deploying the pose services
   (podman)](../SOP/deploy_pose_podman.md).
+- **Real-frame fine-tuning for the parts detectors** — [ADR
+  0017](../Decisions/0017-grayworld-white-balance-sim-to-real.md)'s
+  gray-world white balance and lowered confidence threshold are stopgaps for
+  the sim-to-real gap (the models are trained 100% on synthetic Isaac-Sim
+  renders); the durable fix — fine-tuning on real labelled frames — needs a
+  real-frame dataset that doesn't exist yet and has not been started.
 
 ## Test suite
+
+**Still 204** after the 2026-07-08 debugging/deployment session (commits
+`fcc2773`, `2485997`, `7f12f41`) — no new tests were added for the
+white-balance/conf/locateanything/CORS fixes ([ADR
+0017](../Decisions/0017-grayworld-white-balance-sim-to-real.md)), the
+pose-pipeline wiring ([ADR 0016](../Decisions/0016-gigapose-2d-planar-pose-mode.md)'s
+update), or the `wbk-perception` redeploy script ([ADR
+0018](../Decisions/0018-durable-wbk-perception-redeploy.md), infra-only, not
+Python application code). All verification for this session was manual,
+against the live rig/deployed services — see the ADRs above for the
+specific before/after numbers each fix was checked against.
 
 204 pytest tests (`tests/`), up from 105 before the ERP/LLM planning head
 (2026-07-08): the prior 105 (86 covering pure logic in perception/pose/damage
