@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # App code.
 COPY . .
 
-# yolo :8001 · sam3 :8002 · locateanything :8003
-EXPOSE 8001 8002 8003
+# yolo :8001 · sam3 :8002 · locateanything :8003 · dds :8008
+EXPOSE 8001 8002 8003 8008
 
 CMD ["supervisord", "-c", "/app/perception/supervisord.conf"]

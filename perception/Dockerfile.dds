@@ -1,0 +1,27 @@
+# Standalone DDS cloud-detector proxy — a small CPU-only image.
+#
+# The DDS models (T-Rex2 / DINO-X / Grounding-DINO / DINO-XSeek) run in IDEA's
+# cloud, so this service is just an HTTP client: no torch, no CUDA, no GPU. It
+# deliberately does NOT reuse the ~8 GB `wbk-perception` CUDA image — a slim
+# Python base starts in seconds and needs no GPU slot on the shared box.
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app/perception
+
+# libgl1/libglib2 for cv2 — dds-cloudapi-sdk depends on opencv-python (non-headless)
+# and imports it at module load (coco_rle mask utils).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-dds.txt .
+RUN pip install --no-cache-dir -r requirements-dds.txt
+
+COPY . .
+
+EXPOSE 8008
+
+CMD ["uvicorn", "services.dds.main:app", "--host", "0.0.0.0", "--port", "8008"]

@@ -28,3 +28,12 @@ huggingface-hub>=0.25
 peft>=0.11
 decord>=0.6
 lmdb>=1.4            # LocateAnything-3B remote code imports lmdb
+
+# --- dds (cloud detectors: T-Rex2 / DINO-X / Grounding-DINO / DINO-XSeek) ---
+# Pure network client, no torch. Pulls opencv/supervision/requests transitively.
+# pycocotools is listed explicitly: the SDK imports it (coco_rle masks) but does
+# not declare it. NOTE: the SDK depends on opencv-python (non-headless); libgl1
+# is already installed in the Dockerfile so cv2 imports fine.
+dds-cloudapi-sdk>=0.5.3
+pycocotools>=2.0.7
+flask>=3.0          # imported by dds-cloudapi-sdk (tasks/base.py) but undeclared

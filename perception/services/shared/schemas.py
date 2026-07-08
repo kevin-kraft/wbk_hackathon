@@ -160,3 +160,57 @@ class LocateResponse(BaseModel):
     height: int
     model: str
     inference_ms: float
+
+
+# --------------------------------------------------------------------------- #
+# DDS — DeepDataSpace / IDEA cloud open-world detectors                        #
+# One proxy fronting four cloud models so they can be A/B'd against the local  #
+# YOLO / SAM3 / LocateAnything stack on the same frames:                       #
+#   DINO-X-1.0 · DINO-XSeek-1.0 · GroundingDino-1.6-Pro · T-Rex-2.0            #
+# Boxes always; masks only from DINO-X (feed other models' boxes to SAM3).    #
+# --------------------------------------------------------------------------- #
+class VisualPrompt(BaseModel):
+    """A reference box marking one example of the target object — the strongest
+    signal for *rare* parts that have no good text name.
+
+    `rect` is in the pixel coordinates of its reference image: the main /infer
+    image by default (interactive "draw a box, find the rest"), or
+    `reference_image_b64` if given (a separate labeled crop of the part)."""
+
+    rect: BBox
+    category_id: int = 0
+    reference_image_b64: str | None = None
+
+
+class DdsRequest(ImageInput):
+    """Pick a `model`, then supply exactly one prompt modality:
+      * `text`           — "wheel . eye . helmet" (DINO-X / Grounding-DINO) or a
+                           detailed phrase (DINO-XSeek). Not for T-Rex2.
+      * `visual_prompts` — reference box(es); DINO-X or T-Rex2 only.
+      * `prompt_free`    — DINO-X "detect everything" universal mode.
+    """
+
+    model: str = "DINO-X-1.0"  # DINO-X-1.0 | DINO-XSeek-1.0 | GroundingDino-1.6-Pro | T-Rex-2.0
+    text: str | None = None
+    visual_prompts: list[VisualPrompt] | None = None
+    prompt_free: bool = False
+    return_mask: bool = True  # request masks where supported (DINO-X only)
+    bbox_threshold: float = 0.25
+    iou_threshold: float = 0.8
+    top_k: int | None = None  # keep only the top-k detections by score
+
+
+class DdsDetection(BaseModel):
+    box: BBox
+    score: float
+    category: str
+    mask_b64_png: str | None = None  # single-channel (L) PNG, 0/255; DINO-X only
+
+
+class DdsResponse(BaseModel):
+    detections: list[DdsDetection]
+    width: int
+    height: int
+    model: str  # echoes the DDS model id that produced these
+    api_path: str  # the DDS V2 endpoint hit (handy when comparing models)
+    inference_ms: float

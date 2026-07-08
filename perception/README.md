@@ -1,17 +1,54 @@
 # Perception module
 
-Three inference microservices — **YOLO**, **SAM3**, **LocateAnything** — each a
-FastAPI app, all running in **one CUDA container** under `supervisord`. This is
-the vision layer of the disassembly system. See [`../docs/architecture.md`](../docs/architecture.md)
-for the full picture.
+Inference microservices — **YOLO**, **SAM3**, **LocateAnything**, **YOLO-Seg**,
+and a **DDS** cloud-detector proxy — each a FastAPI app. The local (GPU) ones run
+in **one CUDA container** under `supervisord`; DDS is a CPU-only network client.
+This is the vision layer of the disassembly system. See
+[`../docs/architecture.md`](../docs/architecture.md) for the full picture.
 
 | Service | Port | Endpoint |
 |---|---|---|
 | yolo | 8001 | `POST /infer` — object detection |
 | sam3 | 8002 | `POST /infer` — promptable segmentation |
 | locateanything | 8003 | `POST /infer` — text-prompted localization |
+| yoloseg | 8007 | `POST /infer` — instance segmentation (trained parts) |
+| dds | 8008 | `POST /infer` — cloud open-world detectors (T-Rex2 / DINO-X / …) |
 
 Each also serves `GET /health`, `GET /` (info), and `GET /docs` (OpenAPI UI).
+
+## DDS — cloud open-world detectors (for comparison)
+
+The `dds` service fronts the [DeepDataSpace](https://cloud.deepdataspace.com) /
+IDEA cloud models behind the same contract as the local services, so they can be
+A/B'd on the same frames. Pick a `model`; results come back in the **input
+frame's pixel coordinates** (the SDK auto-resizes for the API and un-scales
+boxes/masks back).
+
+| `model` | Endpoint | Prompt modalities | Masks? |
+|---|---|---|---|
+| `DINO-X-1.0` (default) | dinox | text · visual · prompt-free | ✅ coco_rle |
+| `DINO-XSeek-1.0` | dino_xseek | text (long/referring phrases) | ❌ |
+| `GroundingDino-1.6-Pro` | grounding_dino | text | ❌ |
+| `T-Rex-2.0` | trex | **visual** (reference box) | ❌ |
+
+Boxes always; masks only from DINO-X — feed any other model's box to SAM3 (`boxes`
+prompt) for a pixel mask. Request fields: `text`, `visual_prompts` (reference
+boxes, optionally on a separate `reference_image_b64` crop of a rare part),
+`prompt_free`, `return_mask`, `bbox_threshold`, `iou_threshold`, `top_k`.
+
+```bash
+IMG=$(base64 -w0 frame.jpg)
+# text prompt (dot-separated concepts) via DINO-X — boxes + masks
+curl -s localhost:8008/infer -H 'content-type: application/json' \
+  -d "{\"image_b64\":\"$IMG\",\"model\":\"DINO-X-1.0\",\"text\":\"gear . screw . bracket\"}" | jq '.detections[:3]'
+
+# visual prompt — draw a box around one example, T-Rex2 finds the rest (rare parts)
+curl -s localhost:8008/infer -H 'content-type: application/json' \
+  -d "{\"image_b64\":\"$IMG\",\"model\":\"T-Rex-2.0\",\"visual_prompts\":[{\"rect\":{\"x1\":600,\"y1\":386,\"x2\":688,\"y2\":474}}]}" | jq '.detections | length'
+```
+
+Requires `DDS_API_TOKEN` in the environment. Without it the service still starts
+and `/health` responds, but `/infer` returns 400 until a token is set.
 
 ## Run
 
@@ -63,6 +100,9 @@ supervisord -c supervisord.conf
 | `YOLO_WEIGHTS` | `yolo11n.pt` | YOLO checkpoint (name auto-downloads, or a path in `WEIGHTS_DIR`) |
 | `SAM3_MODEL_ID` / `SAM3_WEIGHTS` | — | SAM3 backend id / checkpoint |
 | `LOCATE_MODEL_ID` / `LOCATE_WEIGHTS` | — | LocateAnything backend id / checkpoint |
+| `DDS_API_TOKEN` | — | DeepDataSpace cloud token (required for the `dds` service) |
+| `DDS_ENDPOINT` | — | Override DDS host (blank = SDK default) |
+| `DDS_DEFAULT_MODEL` | `DINO-X-1.0` | DDS model used when a request omits `model` |
 
 ## Layout
 

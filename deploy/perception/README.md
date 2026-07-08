@@ -9,6 +9,7 @@ dashboard host over the `ssh gpu-server` LocalForward (18001 yolo, 18002 sam3,
 | `wbk-perception` | yolo `:8001`, locateanything `:8003` | 6767, 6769 | bind-mount `/mnt/vss-data/kip/perception` |
 | `wbk-sam3` | sam3 `:8002` | — | (own image) |
 | `wbk-yoloseg` | yoloseg `:8007` | 6770 | bind-mount `/mnt/vss-data/kip/perception` |
+| `wbk-dds` | dds `:8008` | 6771 | bind-mount `/mnt/vss-data/kip/perception` (CPU-only) |
 
 Canonical source-of-truth on the box: **`/mnt/vss-data/kip/perception`**
 (rsync target). Weights: `/mnt/vss-data/kip/weights/{parts_detmask,parts_seg}.pt`.
@@ -40,8 +41,25 @@ docker exec wbk-perception supervisorctl \
   -c /app/perception/supervisord.wbk-perception.conf restart locateanything   # or: yolo
 ```
 
+## `deploy-wbk-dds.sh` — cloud-detector proxy sidecar
+
+`wbk-dds` proxies the DeepDataSpace cloud detectors (T-Rex2 / DINO-X /
+Grounding-DINO / DINO-XSeek) so they can be tested/compared against the local
+stack. It is a **CPU-only** network client — no GPU, built from the small
+`Dockerfile.dds` (no CUDA image rebuild). Pass the secrets via the environment:
+
+```bash
+rsync -a perception/ gpu-server:/mnt/vss-data/kip/perception/
+scp deploy/perception/deploy-wbk-dds.sh gpu-server:/tmp/
+ssh gpu-server 'DDS_API_TOKEN=… WBK_API_TOKEN=… bash /tmp/deploy-wbk-dds.sh'
+# reach it: ssh -L 18008:localhost:6771 gpu-server  ->  http://localhost:18008
+```
+
+Code updates (source is bind-mounted): `rsync perception/ -> box` then
+`docker restart wbk-dds`.
+
 ## Teardown (after the competition)
 
 ```bash
-docker rm -f wbk-perception wbk-sam3 wbk-yoloseg
+docker rm -f wbk-perception wbk-sam3 wbk-yoloseg wbk-dds
 ```

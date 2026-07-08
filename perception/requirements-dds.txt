@@ -1,0 +1,13 @@
+# Minimal deps for the standalone DDS proxy sidecar (CPU-only, no torch/CUDA).
+# Used by Dockerfile.dds — a tiny python:slim image, NOT the big perception image.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+numpy>=1.26
+pillow>=10.3
+# Cloud client + coco_rle mask decode. dds-cloudapi-sdk pulls opencv-python
+# (non-headless) + supervision + requests transitively; pycocotools is imported
+# by the SDK but not declared by it, so pin it here explicitly.
+dds-cloudapi-sdk>=0.5.3
+pycocotools>=2.0.7
+flask>=3.0            # imported by dds-cloudapi-sdk (tasks/base.py) but undeclared

@@ -37,6 +37,14 @@ class Settings:
     locate_model_id: str = field(default_factory=lambda: os.getenv("LOCATE_MODEL_ID", ""))
     locate_weights: str = field(default_factory=lambda: os.getenv("LOCATE_WEIGHTS", ""))
 
+    # --- DDS cloud detectors (T-Rex2 / DINO-X / Grounding-DINO / DINO-XSeek) ---
+    # These are NETWORK calls, not local weights — no GPU, no HF cache. The token
+    # is required; without it the service starts but /infer 400s with a clear
+    # message. Get one at https://cloud.deepdataspace.com (Request API Token).
+    dds_api_token: str = field(default_factory=lambda: os.getenv("DDS_API_TOKEN", ""))
+    dds_endpoint: str = field(default_factory=lambda: os.getenv("DDS_ENDPOINT", ""))  # override host (blank = SDK default)
+    dds_default_model: str = field(default_factory=lambda: os.getenv("DDS_DEFAULT_MODEL", "DINO-X-1.0"))
+
 
 def resolve_device(preferred: str) -> str:
     """Fall back to CPU if CUDA was requested but is unavailable."""

@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from services.dds import main as dds_main
 from services.locateanything import main as locate_main
 from services.shared.schemas import (
+    DdsDetection,
+    DdsResponse,
     Detection,
     BBox,
     LocateResponse,
@@ -76,6 +79,35 @@ def test_locateanything_infer_returns_locations(monkeypatch):
         resp = client.post("/infer", json={"image_b64": "abc", "query": "the bolt"})
         assert resp.status_code == 200
         assert resp.json()["locations"][0]["label"] == "bolt"
+
+
+def test_dds_infer_returns_detections(monkeypatch):
+    monkeypatch.setattr(dds_main.model, "load", lambda: setattr(dds_main.model, "_loaded", True))
+    canned = DdsResponse(
+        detections=[
+            DdsDetection(box=BBox(x1=0, y1=0, x2=2, y2=2), score=0.8, category="gear")
+        ],
+        width=20,
+        height=20,
+        model="DINO-X-1.0",
+        api_path="/v2/task/dinox/detection",
+        inference_ms=3.0,
+    )
+    monkeypatch.setattr(dds_main.model, "infer", lambda req: canned)
+
+    with TestClient(dds_main.app) as client:
+        health = client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["service"] == "dds"
+
+        resp = client.post(
+            "/infer",
+            json={"image_b64": "abc", "model": "DINO-X-1.0", "text": "gear . screw"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["detections"][0]["category"] == "gear"
+        assert body["api_path"] == "/v2/task/dinox/detection"
 
 
 def test_root_info_route_lists_endpoints():
