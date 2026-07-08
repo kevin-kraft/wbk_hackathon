@@ -191,6 +191,57 @@ in behind the same seams without touching the loop. And the same run can drive
 the **real arm, a simulated digital twin, or both at once**, so the system is
 demonstrable even without hardware in hand.
 
+## System architecture (high level)
+
+Under the hood, disassemblr is not one big program — it's a **pipeline of small,
+containerized services**, each owning one stage and talking to the next over a
+simple, uniform contract (FastAPI, JSON with base64-encoded images). An
+**orchestrator** state machine drives the whole loop and is the only component
+that knows the full sequence; everything else is a swappable specialist.
+
+```
+   ┌──────────────────────────  ORCHESTRATOR  (state machine, :8000)  ──────────────────────────┐
+   │  ERP + LLM plan · per-step sequencing · safety validation · robot target (real/sim/both)   │
+   └───────────────────────────────────────────────┬───────────────────────────────────────────┘
+                                                    │  (drives every stage below, in a loop)
+   scene camera ─► PERCEPTION ─► 6DoF POSE ─► GRASP PLAN ─► MOVEMENT ─► [grip sensor] ─► DAMAGE ─► bin
+   (Zivid, Jetson)  (YOLO / SAM3 /  (Foundation-  (naive →    (Jetson     (motor-current  (VLM,     └─ loop
+                     LocateAnything)  Pose /        learned)    robot        grip check)     OK/NOK)
+                                      GigaPose)                 bridge)
+   ────────────────────────────────────────────────────────────────────────────────────────────────
+   Operator console (React + Vite + TS dashboard) ── live SSE stream ──► watch the run, pick product/target
+```
+
+**The layers, top to bottom:**
+
+- **Orchestrator (the brain).** A headless, CI-testable state machine that reads
+  the ERP product, gets the LLM-generated plan, and walks it step by step —
+  calling each stage, enforcing the safety validator, and handling retries. It
+  depends only on *interfaces*, so mocks and real services are interchangeable.
+- **Perception (what & where, in the image).** Vision models (YOLO detection/
+  segmentation, SAM3, LocateAnything) find and ground the specific part the
+  current step needs, from the live camera scene.
+- **6DoF pose (where, in 3D).** Foundation-model pose estimators (FoundationPose,
+  GigaPose — including a CAD-free 2D planar mode) turn that detection into an
+  actual 3D position and orientation the robot can act on.
+- **Grasp + movement (the hands).** Grasp planning turns a pose into an approach;
+  a Jetson-hosted robot bridge executes it on the real arm — or a **simulated
+  digital twin, or both mirrored at once**.
+- **Grip check + damage inspection (the eyes on quality).** Motor-current grip
+  sensing verifies the pick succeeded; a vision-language model then judges each
+  removed part OK / not-OK and sorts it — fail-closed, uncertain → reject.
+- **Operator console (the window).** A separate React dashboard consumes the
+  orchestrator's read-only event stream (SSE) to show the run live and let the
+  operator pick the product and robot target — decoupled, re-pointable per host.
+
+**Why this shape matters for the pitch:** the microservice split means each piece
+is **independently swappable and independently deployable** — better vision
+models, a different robot, a new pose estimator all drop in behind the same
+contract without touching the loop. Compute-heavy stages run on a **GPU server**,
+robot-facing stages on the **Jetson at the cell**, and the whole thing degrades
+gracefully to **mocks** so it demos end-to-end even before every real component
+is wired. It's a research platform, not a one-off script.
+
 ## What makes it more than a demo
 
 - **Product-agnostic by design.** The teardown sequence comes from data (ERP) +
