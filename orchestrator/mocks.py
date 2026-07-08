@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .models import Box, Grasp, Inspection, PartDetection, Pose, SceneFrame
+from .models import Box, Grasp, Inspection, PartDetection, Plan, PlanStep, Pose, SceneFrame
 
 _DUMMY_IMG = "iVBORw0KGgo="  # placeholder base64; mocks never decode it
 
@@ -41,6 +41,13 @@ class MockPerception:
         name = self.remaining[0]
         return PartDetection(class_name=name, score=0.9, box=Box(100, 100, 200, 200),
                              point=(150, 150), id=name)
+
+    def locate(self, frame: SceneFrame, class_name: str) -> PartDetection | None:
+        # Plan-driven grounding: the named part is visible iff not yet removed.
+        if class_name not in self.remaining:
+            return None
+        return PartDetection(class_name=class_name, score=0.9, box=Box(100, 100, 200, 200),
+                             point=(150, 150), id=class_name)
 
     def segment(self, frame: SceneFrame, part: PartDetection) -> str | None:
         return _DUMMY_IMG
@@ -99,6 +106,46 @@ class MockGrip:
             self._pending_fail = False
             return False
         return True
+
+
+class MockPlanProvider:
+    """Fixed plan matching MockPerception's default part sequence, so the
+    plan-driven loop dry-runs end-to-end with no ERP file or LLM."""
+
+    def __init__(self, steps: list[tuple[str, str]] | None = None) -> None:
+        self.step_specs = steps or [
+            ("cover", "lift the top cover straight up"),
+            ("bracket", "slide the bracket out sideways"),
+            ("gear", "pull the gear off its shaft"),
+        ]
+
+    def get_plan(self, product_id: str) -> Plan:
+        return Plan(
+            product=product_id,
+            steps=[PlanStep(part=p, action=a, index=i + 1)
+                   for i, (p, a) in enumerate(self.step_specs)],
+            source="mock",
+        )
+
+
+class MockActionSynthesizer:
+    """Returns the canonical grasp vocabulary sequence (as raw dicts, like an
+    LLM would) so dry runs exercise the validate->execute guardrail path.
+    `bad` makes it emit an out-of-vocabulary action to exercise the fallback."""
+
+    def __init__(self, bad: bool = False) -> None:
+        self.bad = bad
+        self.calls = 0
+
+    def synthesize(self, part: PartDetection, grasp: Grasp, step: PlanStep | None) -> list:
+        self.calls += 1
+        if self.bad:
+            return [{"kind": "move_to_pose", "pose": [[1, 0, 0, 0]]}]  # coordinates -> rejected
+        return [
+            {"kind": "move_to_pose", "pose_ref": "pre_grasp"},
+            {"kind": "move_to_pose", "pose_ref": "grasp"},
+            {"kind": "gripper", "closed": True},
+        ]
 
 
 class MockInspectionCamera:

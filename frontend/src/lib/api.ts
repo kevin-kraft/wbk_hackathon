@@ -1,8 +1,10 @@
 // Thin fetch helpers bound to the runtime config.
 
 import type {
+  ErpProduct,
   HealthStatus,
   LocateResponse,
+  PlanPreview,
   RobotTarget,
   Sam3Response,
   SceneCapture,
@@ -47,14 +49,17 @@ export async function checkHealth(key: ServiceKey, timeoutMs = 3000): Promise<He
 }
 
 /** POST {orchestrator}/run — non-streaming full run (returns events + stats).
- * `target` (real|sim|both) overrides which robot the loop drives for this run. */
+ * `target` (real|sim|both) overrides which robot the loop drives for this run.
+ * `product` switches to a plan-driven run (ERP + LLM plan, executed step by step). */
 export async function runOnce(
   dryRun: boolean,
   target?: RobotTarget,
+  product?: string,
 ): Promise<{ stats: Record<string, number>; target?: string; events: unknown[] }> {
   const base = serviceUrl("orchestrator");
   let url = `${base}/run?dry_run=${dryRun}`;
   if (target) url += `&target=${target}`;
+  if (product) url += `&product=${encodeURIComponent(product)}`;
   const res = await fetch(url, { method: "POST", headers: authHeaders() });
   if (!res.ok) throw new Error(`run failed: HTTP ${res.status}`);
   return res.json();
@@ -62,15 +67,40 @@ export async function runOnce(
 
 /** URL for the SSE streaming run endpoint. The token rides as a query param
  * because EventSource can't set an Authorization header. `target` picks the
- * robot (real|sim|both) for this run. */
-export function runStreamUrl(dryRun: boolean, delaySeconds: number, target?: RobotTarget): string {
+ * robot (real|sim|both); `product` switches to a plan-driven run. */
+export function runStreamUrl(
+  dryRun: boolean,
+  delaySeconds: number,
+  target?: RobotTarget,
+  product?: string,
+): string {
   const base = serviceUrl("orchestrator");
   const delay = Math.max(0, delaySeconds);
   let url = `${base}/events/run?dry_run=${dryRun}&delay=${delay}`;
   if (target) url += `&target=${target}`;
+  if (product) url += `&product=${encodeURIComponent(product)}`;
   const t = apiToken();
   if (t) url += `&token=${encodeURIComponent(t)}`;
   return url;
+}
+
+/** GET {orchestrator}/products — the operator-selectable (mock-)ERP products. */
+export async function fetchProducts(): Promise<ErpProduct[]> {
+  const base = serviceUrl("orchestrator");
+  const res = await fetch(`${base}/products`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`products failed: HTTP ${res.status}`);
+  return ((await res.json()) as { products: ErpProduct[] }).products;
+}
+
+/** GET {orchestrator}/plan — preview the generated plan without executing it. */
+export async function fetchPlan(product: string, dryRun: boolean): Promise<PlanPreview> {
+  const base = serviceUrl("orchestrator");
+  const res = await fetch(
+    `${base}/plan?product=${encodeURIComponent(product)}&dry_run=${dryRun}`,
+    { headers: authHeaders() },
+  );
+  if (!res.ok) throw new Error(`plan failed: HTTP ${res.status}`);
+  return res.json();
 }
 
 // --- Perception inference ------------------------------------------------- //

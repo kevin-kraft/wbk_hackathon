@@ -29,6 +29,10 @@ def build_orchestrator(
             grip=mocks.MockGrip(),
             inspection_camera=mocks.MockInspectionCamera(),
             damage=mocks.MockDamage(),
+            # Plan-driven dry runs exercise the full new path: mock plan +
+            # dict-shaped synthesizer output through the validate/execute guardrail.
+            plan_provider=mocks.MockPlanProvider(),
+            synthesizer=mocks.MockActionSynthesizer(),
             config=config,
             on_event=on_event,
         )
@@ -65,9 +69,42 @@ def build_orchestrator(
         grip=grip,
         inspection_camera=OpenCVInspectionCamera(int(os.getenv("INSPECTION_CAM_INDEX", "0"))),
         damage=HttpDamage(config),
+        plan_provider=_build_plan_provider(config),
+        synthesizer=_build_synthesizer(config),
         config=config,
         on_event=on_event,
     )
+
+
+def _build_plan_provider(config: OrchestratorConfig):
+    """LLM-generated plans when configured, static ERP order otherwise."""
+    mode = config.planner_mode
+    if mode not in ("auto", "llm", "static"):
+        raise ValueError(f"PLANNER_MODE must be auto|llm|static, got {mode!r}")
+    if mode == "llm" and not config.openrouter_api_key:
+        raise ValueError("PLANNER_MODE=llm requires OPENROUTER_API_KEY")
+    if mode in ("auto", "llm") and config.openrouter_api_key:
+        from .clients.llm_planner import LlmPlanProvider
+
+        return LlmPlanProvider(config)
+    from .clients.erp import StaticPlanProvider
+
+    return StaticPlanProvider(config)
+
+
+def _build_synthesizer(config: OrchestratorConfig):
+    """LLM action synthesis is opt-in (ACTION_SYNTHESIS=llm); default is the
+    scripted grasp sequence — identical motion to the original loop."""
+    mode = config.action_synthesis
+    if mode not in ("scripted", "llm"):
+        raise ValueError(f"ACTION_SYNTHESIS must be scripted|llm, got {mode!r}")
+    if mode == "llm":
+        if not config.openrouter_api_key:
+            raise ValueError("ACTION_SYNTHESIS=llm requires OPENROUTER_API_KEY")
+        from .clients.llm_actions import LlmActionSynthesizer
+
+        return LlmActionSynthesizer(config)
+    return None
 
 
 def _build_robot(config: OrchestratorConfig, on_event: Callable[[LoopEvent], None] | None):

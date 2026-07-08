@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from ..models import Grasp, Inspection, PartDetection, Pose, SceneFrame
+from ..models import ArmAction, Grasp, Inspection, PartDetection, Plan, PlanStep, Pose, SceneFrame
 
 
 class SceneCamera(Protocol):
@@ -27,11 +27,37 @@ class PerceptionClient(Protocol):
         after a failed step naturally re-proposes the same part.
         """
 
+    def locate(self, frame: SceneFrame, class_name: str) -> PartDetection | None:
+        """Ground a SPECIFIC named part in the scene (plan-driven mode); None if
+        it isn't visible. Unlike `next_part`, the part is chosen by the plan,
+        not by perception."""
+
     def segment(self, frame: SceneFrame, part: PartDetection) -> str | None:
         """Precise mask (base64 PNG) of the target part, for pose + before/after."""
 
     def is_present(self, frame: SceneFrame, part: PartDetection) -> bool:
         """Whether the part is still in the assembly (used to confirm removal)."""
+
+
+class PlanProvider(Protocol):
+    """Head of pipeline: turn an operator-selected product into an ordered
+    disassembly plan (ERP data + optionally an LLM — see clients/erp.py and
+    clients/llm_planner.py)."""
+
+    def get_plan(self, product_id: str) -> Plan:
+        """Ordered steps for disassembling `product_id`. Raises ValueError for
+        an unknown product."""
+
+
+class ActionSynthesizer(Protocol):
+    """Proposes arm actions for one plan step, in the constrained vocabulary
+    (actions.py). The loop validates the output with `validate_actions` and
+    falls back to the scripted sequence on ANY violation — implementations can
+    therefore be best-effort."""
+
+    def synthesize(self, part: PartDetection, grasp: Grasp, step: PlanStep | None) -> list[ArmAction]:
+        """Action sequence to approach + grasp `part` for this plan step. May
+        return raw dicts (e.g. straight from an LLM); the loop coerces them."""
 
 
 class PoseClient(Protocol):

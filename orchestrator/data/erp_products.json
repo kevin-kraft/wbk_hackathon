@@ -1,0 +1,47 @@
+{
+  "_comment": "Mock ERP dataset (see contracts/ + .agent/Tasks/active/llm_orchestrated_disassembly_plan.md). One entry per operator-selectable product; parts are listed in the ERP's canonical removal order, which StaticPlanProvider uses as-is and LlmPlanProvider may re-order (permutation-validated). Override the path via ERP_PRODUCTS_PATH.",
+  "products": {
+    "gearbox-demo": {
+      "name": "Demo gearbox",
+      "description": "Small demonstration gearbox used for the hackathon work cell: a top cover over a mounting bracket that retains the main gear.",
+      "parts": [
+        {
+          "part": "cover",
+          "action": "lift the top cover straight up",
+          "notes": "sits loosely on locating pins; no fasteners"
+        },
+        {
+          "part": "bracket",
+          "action": "slide the mounting bracket out sideways",
+          "notes": "held by the cover; free once the cover is off"
+        },
+        {
+          "part": "gear",
+          "action": "pull the main gear off its shaft",
+          "notes": "light press fit on the shaft; retained by the bracket"
+        }
+      ]
+    },
+    "valve-block": {
+      "name": "Pneumatic valve block",
+      "description": "Valve manifold with a solenoid on top and two fittings on the side face.",
+      "parts": [
+        {
+          "part": "solenoid",
+          "action": "lift the solenoid off the manifold",
+          "notes": "plugged onto the pilot port; pull straight up"
+        },
+        {
+          "part": "fitting_left",
+          "action": "pull the left push-in fitting out of the manifold",
+          "notes": "quarter-turn then pull"
+        },
+        {
+          "part": "fitting_right",
+          "action": "pull the right push-in fitting out of the manifold",
+          "notes": "quarter-turn then pull"
+        }
+      ]
+    }
+  }
+}

@@ -6,6 +6,9 @@
 - [Integration Points & Wire Contracts](./integration_points.md) — the SSE event contract + CORS
 - [ADR 0008: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why this isn't fused into the orchestrator
 - [ADR 0009: shared-token auth](../Decisions/0009-shared-token-auth.md) — the `apiToken` field below, and why `GET /events/run` needed a query-param token transport
+- [ADR 0011: LLM action selector, constrained vocabulary](../Decisions/0011-llm-action-selector-constrained-vocabulary.md) — the `GUARDRAIL` event `PlanProgress`/the event log surface
+- [ADR 0014: robot target selection (real \| sim \| both)](../Decisions/0014-robot-target-real-sim-both.md) — the Real/Sim/Both toggle this doc's "Sim / digital-twin UI" section covers
+- `contracts/simulation_api.md` / `contracts/sim_scene_capture.md` — the Isaac Sim command-bus + (draft, unimplemented) scene-capture surfaces the sim-side UI calls
 - `frontend/README.md` (in-repo) — the module's own README; this doc adds the `.agent/` cross-reference layer on top, not a duplicate
 
 ## What it is
@@ -26,29 +29,146 @@ belt-and-braces on top of that, not the primary mechanism).
 `npm run build` runs `tsc -b && vite build` (type-check + bundle to `dist/`)
 and is verified clean.
 
-`npm test` runs a **Vitest** unit suite (26 tests, jsdom env,
+`npm test` runs a **Vitest** unit suite (30 tests, jsdom env,
 `frontend/vitest.config.ts`, `src/**/*.test.ts`) — see "Test suite" below.
 
 ## The four pages (`frontend/src/pages/`)
 
 | Page | File | What it shows |
 |---|---|---|
-| Dashboard | `DashboardPage.tsx` | Run controls (start/stop, dry-run toggle, pace/delay), the 7-stage pipeline tracker (`StageTracker`) driven by the *latest* live event, scene camera (`MjpegView`), grip telemetry, a next-part text prompt box, bin tallies, and the full event log. |
-| Perception | `PerceptionPage.tsx` | Scene view plus the YOLO / SAM 3 / LocateAnything endpoints and their `/health` status (detection overlays are noted as future work, not yet rendered). |
+| Dashboard | `DashboardPage.tsx` | Run controls (start/stop, dry-run toggle, pace/delay, the Real/Sim/Both robot-target toggle, `ProductSelector` — see "Plan mode UI" below), the 7-stage pipeline tracker (`StageTracker`) driven by the *latest* live event, `PlanProgress` (plan-driven runs only), scene camera (real `MjpegView` or, in Sim source mode, a rendered preview — see "Sim / digital-twin UI" below), grip telemetry, a next-part text prompt box, bin tallies, and the full event log. |
+| Perception | `PerceptionPage.tsx` | **Rewritten 2026-07-08** — no longer a stub: capture a scene (real Zivid or sim render, via `SourceToggle`), pick a target part (`PartSelector`) or a custom prompt, run YOLO / SAM 3 / LocateAnything inference, and see the result rendered as box/mask/point overlays on the captured frame (`SceneView`) — see "Sim / digital-twin UI" below. Detection overlays are no longer future work. |
 | Inspection | `InspectionPage.tsx` | Inspection camera, the damage-VLM endpoint, a per-part OK/damaged verdicts table, and bin state. |
-| Settings | `SettingsPage.tsx` | Live-editable text fields for every service endpoint and both camera stream URLs, plus run defaults (dry-run, pace) and the shared `apiToken` (see "Auth token" below); "Save & reload" persists to `localStorage`, "Reset to config.json" clears the override. |
+| Settings | `SettingsPage.tsx` | Live-editable text fields for every service endpoint (now including the simulator's `movementSim`/`gripSim` and the Zivid `sceneCapture` service) and both camera stream URLs, plus run defaults (dry-run, pace, and — added 2026-07-08 — the default robot target) and the shared `apiToken` (see "Auth token" below); "Save & reload" persists to `localStorage`, "Reset to config.json" clears the override. |
 
 Shared building blocks in `frontend/src/components/`: `Layout`, `StageTracker`
 (maps loop state → one of the 7 canonical stages, see `lib/stages.ts`),
 `EventLog`, `GripTelemetry`, `BinTally`, `PromptBox`, `MjpegView` (raw
-`<img>`-based MJPEG viewer), `ServiceHealthStrip`, `ServiceInfo`, and a small
-`ui.tsx` (`Card`, etc.) primitives file.
+`<img>`-based MJPEG viewer), `ServiceHealthStrip`, `ServiceInfo`, `ui.tsx`
+(`Card`, etc.) primitives; `ProductSelector` and `PlanProgress` (added
+2026-07-08, see "Plan mode UI" below); and `SourceToggle`, `PartSelector`,
+`SceneView` (added 2026-07-08, see "Sim / digital-twin UI" below).
+
+## Plan mode UI (`ProductSelector`, `PlanProgress`, added 2026-07-08)
+
+Mirrors the orchestrator's plan-driven `run(product=...)` mode (see
+[System: Orchestrator](./orchestrator.md) "Plan mode"):
+
+- **`ProductSelector`** (`frontend/src/components/ProductSelector.tsx`) —
+  a dropdown fetched from `GET /products` (`fetchProducts()` in
+  `lib/api.ts`), plumbed into `RunControls` via a `productSlot` prop.
+  `value=""` means manual/fixed mode; selecting a product threads that ID
+  through to `runOnce()`/`runStreamUrl()` as the `product` query param
+  (`lib/api.ts`, `useRunStream.start()`, `runContext.tsx`).
+- **`PlanProgress`** (`frontend/src/components/PlanProgress.tsx`) — a live
+  checklist of the generated plan, rendered only when a `PLAN_GENERATED`
+  event has arrived (returns `null` otherwise — invisible in fixed-mode
+  runs). Driven by `derivePlan(events)` (`lib/derive.ts`): the
+  `PLAN_GENERATED` event supplies the full step list (`part`, `action`);
+  subsequent `STEP` events mark a row `active` by index, `SORT` marks the
+  active row `done`, `SKIP` marks it `skipped`, `BLOCKED` marks it `blocked`.
+  Shows the plan's `source` (`static` | `llm` | `mock` | `static-fallback`)
+  above the checklist.
+
+## Sim / digital-twin UI (added 2026-07-08)
+
+Mirrors the orchestrator's `ROBOT_TARGET`/`?target=` robot selection (see
+[System: Orchestrator](./orchestrator.md) "Robot target selection" and
+[ADR 0014](../Decisions/0014-robot-target-real-sim-both.md)) and lets an
+operator drive/inspect the Isaac Sim digital twin from the browser:
+
+- **Robot-target toggle** (`RunControls.tsx`) — Real / Sim / Both buttons,
+  disabled while a run is in progress or while *Dry run* is checked (mocks
+  ignore the target). Sim/Both are additionally disabled until a simulator
+  endpoint is configured (`simAvailable = Boolean(serviceUrl("movementSim"))`
+  in `DashboardPage.tsx`). `onStart` passes `dryRun ? undefined :
+  robotTarget` through to `useRunStream.start()` → `runStreamUrl()`'s
+  `?target=` param (see [System: Orchestrator](./orchestrator.md) "Entry
+  points"). The server's actually-used target comes back on the SSE `start`
+  frame and is surfaced via `RunStreamState.activeTarget`
+  (`useRunStream.ts`) — rendered as a "▶ REAL ARM" / "▶ SIMULATOR" /
+  "▶ REAL + SIM" badge next to the run-status pill, in case `ROBOT_TARGET`
+  was forced server-side and differs from what was requested.
+- **`SIM_WARN`** (`lib/types.ts` `LoopState`, `lib/stages.ts` `STATE_STYLE`)
+  — the event log renders a `both`-mode mirror-fault event (raised by
+  `TeeMovement`, see [ADR 0014](../Decisions/0014-robot-target-real-sim-both.md))
+  with the same amber "attention" pill as `GUARDRAIL`/`REGRASP`/`BLOCKED` —
+  a warning, not a run failure; the run keeps going.
+- **`SourceToggle`** (`frontend/src/components/SourceToggle.tsx`) — Real /
+  Sim picker for **scene images only** (independent of the robot target —
+  an operator can watch a Sim-rendered scene while still driving the real
+  arm, or vice versa). Lifted to `RunProvider`'s `sourceMode`/`setSourceMode`
+  (`runContext.tsx`), defaulting to `sim` when the initial robot target is
+  `sim`, else `real`. Used on the Dashboard (scene preview) and Perception
+  page (capture source).
+- **`captureScene(mode)`** (`lib/api.ts`) — real mode `POST`s the Zivid
+  `scene_camera` service's `/capture` (`serviceUrl("sceneCapture")`); sim
+  mode `POST`s the Isaac backend's `/simulation/scene/capture`
+  (`serviceUrl("movementSim")` + the path from `contracts/sim_scene_capture.md`).
+  A `404`/`501` response (the contract's documented "not implemented yet"
+  status) is normalized to the exported `SIM_NOT_IMPLEMENTED` sentinel error,
+  which `PerceptionPage.tsx`/`DashboardPage.tsx`'s `friendlyError()` helpers
+  turn into "Sim scene capture isn't implemented yet (Group 2). Switch to
+  Real, or see contracts/sim_scene_capture.md." — a UI-level degrade-
+  gracefully path for a contract Group 2 hasn't built yet, not an error state.
+  `generateScenePreview()` (Dashboard's frontal overview render) follows the
+  same `SIM_NOT_IMPLEMENTED` pattern against `/simulation/scene/preview`.
+- **`PerceptionPage.tsx`, rewritten** — was a static `MjpegView` stub with a
+  "detection overlays: future" note; now a working capture→infer→overlay
+  loop: *Capture Zivid view* (or *Render Zivid view* in Sim source mode) →
+  pick YOLO / SAM 3 / LocateAnything → for SAM 3/LocateAnything, pick a
+  target part via `PartSelector` or a free-text prompt → `runYolo()`/
+  `runSam3()`/`runLocate()` (`lib/api.ts`'s `postInfer()` helper, `POST
+  {service}/infer`) → results rendered on `SceneView` as YOLO boxes, SAM 3
+  masks (toggleable boxes/masks view), or LocateAnything box+point overlays.
+- **`PartSelector`** (`frontend/src/components/PartSelector.tsx`) +
+  `lib/parts.ts`'s `SUPPORTED_PARTS` — a fixed three-part vocabulary (`anker`,
+  `bürstenhalter`/brush holder, `poltopf`) for the open-vocab SAM 3/
+  LocateAnything prompt, **the "short" (`kurz`) variant of each part only**
+  (operator decision, 2026-07-07), plus a "Custom…" free-text escape hatch.
+  Does not apply to YOLO, which has a fixed closed (COCO-80, now custom-
+  trained 18-class, see [System: Training](./training.md)) vocabulary with no
+  prompt.
+- **`SceneView`** (`frontend/src/components/SceneView.tsx`) — renders a
+  captured RGB frame plus overlays in the image's **native pixel space**
+  (an `<svg viewBox>` sized to the loaded image's natural dimensions) so
+  `/infer` coordinates map 1:1 with no separate scaling step; box labels get
+  a distinct color cycled per instance. `MaskCanvas` composites per-instance
+  single-channel mask PNGs into one colored overlay canvas
+  (threshold-per-pixel alpha). `DepthCanvas` renders the 16-bit-mm depth PNG
+  as a min–max-normalized "turbo"-style heatmap — a **display aid only**
+  (browsers downsample 16-bit PNGs to 8-bit on decode), not metric depth.
+- **No new frontend test coverage.** `SceneView`, `SourceToggle`,
+  `PartSelector`, and the rewritten `PerceptionPage.tsx` capture/inference
+  flow have no Vitest tests as of this capture — see "Test suite" below.
 
 ## Runtime endpoint config — the flexible bit (`frontend/src/config/runtime.ts`)
 
 Every microservice (orchestrator, yolo, sam3, locateanything, foundationpose,
-gigapose, damage, movement, grip) and both camera streams (sceneCamera,
-inspectionCamera) can live on a **different host**. Because this is a static
+gigapose, damage, movement, grip, and — added 2026-07-08 —
+`movementSim`/`gripSim` (the Isaac Sim backend/its optional grip endpoint)
+and `sceneCapture` (the real Zivid `scene_camera` service, default
+`http://localhost:9002`)) and both camera streams (sceneCamera,
+inspectionCamera) can live on a **different host**. The simulator keys
+default to **empty** — a blank `movementSim` is what `simAvailable` (see "Sim
+/ digital-twin UI" above) checks to grey out Sim/Both. `frontend/public/config.json`'s
+committed defaults for `yolo`/`sam3`/`locateanything`/`foundationpose`/`gigapose`
+now point at `localhost:1800{1-5}` (was `800{1-5}`) — the SSH-tunnel port
+convention from the split GPU-server deployment, see
+[SOP: deploying perception to a remote GPU server](../SOP/deploy_perception_gpu_server.md);
+`movement`/`grip` now default to `localhost:9000`/`9001` (was a hardcoded
+Jetson IP) for the same local-tunnel convention.
+
+`lib/types.ts`'s `RuntimeConfig`/patch-layer typing was refactored alongside
+this: a new `ConfigPatch` type (`services`/`streams`/`run` all optional,
+independently sparse) replaces ad hoc `Partial<RuntimeConfig>` casts across
+`getOverrides()`/`saveOverrides()`/`envDefaults()`/`loadConfig()` — same
+merge behavior, just a named, reusable shape instead of duplicated inline
+`Partial<...>` annotations. `run` also gained `robotTarget: RobotTarget`
+(default `"real"`, see `localhostDefaults()`) alongside the existing
+`dryRun`/`stepDelayMs`.
+
+Because this is a static
 bundle, "different host per deploy" can't be a build-time-only decision —
 `loadConfig()` (awaited once in `main.tsx` before the app renders) resolves
 the final config by merging four layers, **later wins**:
@@ -104,12 +224,18 @@ field must match it or `POST /run`/`GET /events/run` 401.
 ## Consuming the orchestrator's live loop (`frontend/src/hooks/useRunStream.ts`)
 
 `useRunStream()` wraps a browser `EventSource` against
-`runStreamUrl(dryRun, delaySeconds)` (`lib/api.ts`), which points at the
-orchestrator's `GET /events/run?dry_run=...&delay=...` (see
+`runStreamUrl(dryRun, delaySeconds, target?, product?)` (`lib/api.ts`), which
+points at the orchestrator's
+`GET /events/run?dry_run=...&delay=...&target=...&product=...` (`target`
+and `product` both added 2026-07-08 — see
 [System: Orchestrator](./orchestrator.md) and
 [Integration Points](./integration_points.md) for the wire contract). Key
 behavior:
 
+- A named `start` SSE listener (added alongside `target`) parses the
+  server's opening frame and sets `activeTarget` (`RunStreamState`) — the
+  robot the server actually drove, which the UI badges next to the run
+  status (see "Sim / digital-twin UI" above).
 - Named SSE listeners for `event` (append to `events: LoopEvent[]`),
   `summary` (set `stats: RunStats`), `error` (a **named** server-sent error
   frame — a run failure, not a transport error — sets `status: "error"` and
@@ -127,7 +253,9 @@ behavior:
 `useRunStream()` instance to the app root so Dashboard/Perception/Inspection
 all read the same live run state across client-side navigation, plus
 UI-level state that isn't part of the stream itself (`dryRun`, `delayMs`,
-`prompt`).
+`prompt`, and — added 2026-07-08 — `robotTarget`/`setRobotTarget`,
+`sourceMode`/`setSourceMode` (see "Sim / digital-twin UI" above), and
+`product`/`setProduct` (plan-driven runs, see "Plan mode UI" above)).
 
 `frontend/src/hooks/useServiceHealth.ts` independently polls every service's
 `GET /health` on a 5s interval (`checkHealth()` in `lib/api.ts`) — unrelated
@@ -137,13 +265,19 @@ to the SSE stream, used for the health strip.
 
 Mirrors `orchestrator/loop.py`'s `LoopEvent.state` values onto the 7
 UI-facing stages: `GRIP`/`REGRASP`/`SKIP` → `GRASP`; `REMOVE`/`RECHECK` →
-`REMOVE`; `LOCATE`/`POSE`/`SORT` map 1:1; `DONE`/`BLOCKED`/`SUMMARY` map to
-`null` (terminal/non-stage, not shown as an active pipeline stage).
-`STATE_STYLE` gives each raw state a Tailwind pill style for the event log
-(e.g. `REGRASP` and `BLOCKED` both read amber/rose to read as
-attention-worthy). `frontend/src/lib/types.ts` mirrors
-`orchestrator/models.py`'s `LoopEvent`/stats shapes on the TypeScript side —
-keep these two in sync if the Python dataclasses change shape.
+`REMOVE`; `LOCATE`/`POSE`/`SORT` map 1:1; `DONE`/`BLOCKED`/`SUMMARY` (and, as
+of 2026-07-08, `PLAN_GENERATED`) map to `null` (terminal/non-stage, not
+shown as an active pipeline stage). `STEP` narration doesn't map to a stage
+either — `PlanProgress` renders it, not `StageTracker`. `STATE_STYLE` gives
+each raw state a Tailwind pill style for the event log (e.g. `REGRASP` and
+`BLOCKED` both read amber/rose to read as attention-worthy; `PLAN_GENERATED`/
+`STEP` read fuchsia as the plan-mode-specific states, `GUARDRAIL` reads
+amber alongside the other attention states). `frontend/src/lib/types.ts`
+mirrors `orchestrator/models.py`'s `LoopEvent`/stats shapes on the
+TypeScript side, including the plan-mode `LoopState` additions
+(`PLAN_GENERATED`, `STEP`, `GUARDRAIL`) and the `ErpProduct`/`PlanStepPreview`
+shapes for `/products`/`/plan` — keep these in sync if the Python dataclasses
+change shape.
 
 ## Test suite (`frontend/src/lib/derive.ts` + Vitest)
 
@@ -158,9 +292,15 @@ it unit-testable without rendering:
   `GripTelemetry`.
 - `currentPart(events)` → the active part/step derived from the latest
   `LOCATE` event, consumed by `DashboardPage`.
+- `derivePlan(events)` (added 2026-07-08) → the `PlanProgress` checklist
+  (`source` + per-step `pending`/`active`/`done`/`skipped`/`blocked` status),
+  built from the `PLAN_GENERATED` event plus `STEP`/`SORT`/`SKIP`/`BLOCKED`
+  progress events; returns `null` when no `PLAN_GENERATED` event exists yet
+  (fixed-mode runs never render `PlanProgress`).
 
-`npm test` (`vitest run`, jsdom env) runs 26 tests across 4 files:
-`src/lib/derive.test.ts` (12, the reducers above), `src/config/runtime.test.ts`
+`npm test` (`vitest run`, jsdom env) runs 30 tests across 4 files:
+`src/lib/derive.test.ts` (16, the reducers above — 4 new cases cover
+`derivePlan`), `src/config/runtime.test.ts`
 (6, the four-layer endpoint-precedence resolution described above —
 localStorage > config.json > env > localhost, trailing-slash stripping,
 fetch-failure fallback), `src/lib/stages.test.ts` (5, the
@@ -169,6 +309,14 @@ fetch-failure fallback), `src/lib/stages.test.ts` (5, the
 `runStreamUrl()` appending `?token=`). All passing; wired into CI as
 `npm test` ahead of `npm run build` in the `frontend` job of
 `.github/workflows/tests.yml` — see [System: Architecture](./architecture.md#test-suite).
+Still **30 tests** as of 2026-07-08 — the sim/digital-twin UI added that day
+(`SceneView`, `SourceToggle`, `PartSelector`, the rewritten `PerceptionPage.tsx`
+capture/inference flow, `captureScene`/`generateScenePreview`/`runYolo`/
+`runSam3`/`runLocate` in `lib/api.ts`) shipped with no new Vitest coverage —
+a gap, not a claim of coverage. `npm run build` (type-check) does cover it,
+since `SceneView`'s prop types and `lib/types.ts`'s new shapes
+(`SourceMode`, `RobotTarget`, `ConfigPatch`, the perception result types)
+must still typecheck.
 
 ## Deployment
 

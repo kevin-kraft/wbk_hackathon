@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { useRun } from "../hooks/runContext";
 import { serviceUrl, streamUrl } from "../config/runtime";
-import { currentPart } from "../lib/derive";
+import { currentPart, derivePlan } from "../lib/derive";
 import { generateScenePreview, SIM_NOT_IMPLEMENTED } from "../lib/api";
 import { Card } from "../components/ui";
 import RunControls from "../components/RunControls";
+import ProductSelector from "../components/ProductSelector";
+import PlanProgress from "../components/PlanProgress";
 import SourceToggle from "../components/SourceToggle";
 import StageTracker from "../components/StageTracker";
 import EventLog from "../components/EventLog";
@@ -56,9 +58,23 @@ export default function DashboardPage() {
           onRobotTarget={run.setRobotTarget}
           simAvailable={simAvailable}
           activeTarget={run.activeTarget}
-          onStart={() => run.start(run.dryRun, run.delayMs / 1000, run.dryRun ? undefined : run.robotTarget)}
+          onStart={() =>
+            run.start(
+              run.dryRun,
+              run.delayMs / 1000,
+              run.dryRun ? undefined : run.robotTarget,
+              run.product || undefined,
+            )
+          }
           onStop={run.stop}
           onReset={run.reset}
+          productSlot={
+            <ProductSelector
+              value={run.product}
+              onChange={run.setProduct}
+              disabled={run.status === "running"}
+            />
+          }
         />
         {run.error && (
           <p className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
@@ -66,6 +82,12 @@ export default function DashboardPage() {
           </p>
         )}
       </Card>
+
+      {derivePlan(run.events) && (
+        <Card title="Disassembly plan">
+          <PlanProgress events={run.events} />
+        </Card>
+      )}
 
       <Card
         title="Pipeline"

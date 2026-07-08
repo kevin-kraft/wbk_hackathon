@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { RunStatus } from "../hooks/useRunStream";
 import type { RobotTarget } from "../lib/types";
 
@@ -20,6 +21,7 @@ export default function RunControls({
   onStart,
   onStop,
   onReset,
+  productSlot,
 }: {
   status: RunStatus;
   dryRun: boolean;
@@ -33,6 +35,8 @@ export default function RunControls({
   onStart: () => void;
   onStop: () => void;
   onReset: () => void;
+  // Optional product selector (plan-driven runs), rendered inline with the controls.
+  productSlot?: ReactNode;
 }) {
   const running = status === "running";
   // Target only matters for a live run; mocks ignore it.
@@ -101,6 +105,8 @@ export default function RunControls({
           );
         })}
       </div>
+
+      {productSlot}
 
       <label className="flex items-center gap-2 text-sm text-zinc-400">
         Pace
