@@ -33,10 +33,23 @@ export type RobotTarget = "real" | "sim" | "both";
 // (rgb, GigaPose), or the CAD-free planar pose (2d, GigaPose — mask-derived).
 export type PosePipeline = "rgbd" | "rgb" | "2d";
 
+// Localization mode — how the loop turns a scene into a grasp:
+//   "pose"  — the 6DoF/2D pose stage + back-projection (default).
+//   "slots" — depth-free tray-slot lookup: SAM3 occupancy of a calibrated tray
+//             -> the filled slot's pre-measured base pose. No depth. For the new
+//             arm+camera setup. Mirrors the orchestrator's ?localization= param.
+export type LocalizationMode = "pose" | "slots";
+
 export interface RuntimeConfig {
   services: Record<ServiceKey, string>;
   streams: Record<StreamKey, string>;
-  run: { dryRun: boolean; stepDelayMs: number; robotTarget: RobotTarget; posePipeline: PosePipeline };
+  run: {
+    dryRun: boolean;
+    stepDelayMs: number;
+    robotTarget: RobotTarget;
+    posePipeline: PosePipeline;
+    localization: LocalizationMode;
+  };
   // Shared API token sent to the orchestrator (Bearer header on POST, ?token= on
   // SSE). Empty = don't send one. Matches the services' WBK_API_TOKEN.
   apiToken: string;
@@ -188,4 +201,43 @@ export interface SceneCapture {
   width?: number;
   height?: number;
   backend?: string;
+}
+
+// --- Slot localization (orchestrator /slots/*, orchestrator/slots.py) ---
+
+// One tray slot: image pixel centre + the part's measured base-frame coordinate.
+export interface SlotSpec {
+  id: string;
+  expected_class: string;
+  pixel: [number, number]; // (u, v) at image_size resolution
+  base_xyz_m: [number, number, number]; // grasp point, robot base frame, metres
+  yaw_deg?: number;
+  radius_px?: number | null; // occupancy disk radius override
+}
+
+export interface SlotLayout {
+  name?: string;
+  image_size?: [number, number] | null; // resolution the pixels were calibrated at
+  mask_source?: string; // "sam3" | "yoloseg"
+  defaults?: { radius_px?: number; fill_frac?: number };
+  slots: SlotSpec[];
+}
+
+// Per-slot occupancy result from POST /slots/occupancy.
+export interface SlotStatus {
+  slot_id: string;
+  expected_class: string;
+  filled: boolean;
+  detected_class: string | null;
+  fill_score: number; // best disk-coverage fraction [0..1]
+  pixel: [number, number]; // centre in the ACTUAL captured image
+  identity_ok: boolean; // filled AND detected_class === expected_class
+  base_pose: number[][]; // 4x4 T_base_grasp
+}
+
+export interface SlotOccupancyResponse {
+  mask_source: string;
+  image_size: [number, number] | null;
+  filled: number;
+  slots: SlotStatus[];
 }

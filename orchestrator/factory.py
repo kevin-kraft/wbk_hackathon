@@ -48,6 +48,24 @@ def build_orchestrator(
 
     movement, grip = _build_robot(config, on_event)
 
+    # Localization: the default pose stage + back-projection, or the depth-free
+    # slot lookup (SAM3 occupancy of a calibrated tray -> the slot's base pose).
+    # Both satisfy the same Protocols, so the loop is identical either way.
+    mode = (config.localization_mode or "pose").strip().lower()
+    if mode not in ("pose", "slots"):
+        raise ValueError(f"LOCALIZATION_MODE must be pose|slots, got {mode!r}")
+    perception = HttpPerception(config)
+    if mode == "slots":
+        from .clients.slot_grasp import SlotGraspPlanner
+        from .clients.slot_perception import SlotPerception, SlotPose
+
+        perception = SlotPerception(config, perception)
+        pose_client = SlotPose()
+        grasp_planner = SlotGraspPlanner(config)
+    else:
+        pose_client = HttpPose(config)
+        grasp_planner = NaiveTopDownGrasp(config)
+
     if config.scene_camera_url:
         # Real Zivid capture service (see scene_camera/); satisfies SceneCamera.
         from .clients.http_scene import HttpSceneCamera
@@ -62,9 +80,9 @@ def build_orchestrator(
         )
     return DisassemblyOrchestrator(
         scene_camera=scene,
-        perception=HttpPerception(config),
-        pose=HttpPose(config),
-        grasp=NaiveTopDownGrasp(config),
+        perception=perception,
+        pose=pose_client,
+        grasp=grasp_planner,
         movement=movement,
         grip=grip,
         inspection_camera=OpenCVInspectionCamera(int(os.getenv("INSPECTION_CAM_INDEX", "0"))),

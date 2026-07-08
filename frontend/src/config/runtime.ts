@@ -53,7 +53,7 @@ function localhostDefaults(): RuntimeConfig {
       sceneCapture: "http://localhost:9002",
     },
     streams: { sceneCamera: "", inspectionCamera: "" },
-    run: { dryRun: true, stepDelayMs: 700, robotTarget: "real", posePipeline: "rgbd" },
+    run: { dryRun: true, stepDelayMs: 700, robotTarget: "real", posePipeline: "rgbd", localization: "pose" },
     apiToken: "",
   };
 }

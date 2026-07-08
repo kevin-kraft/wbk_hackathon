@@ -40,6 +40,10 @@ class PartDetection:
     point: tuple[float, float] | None = None
     mask_b64: str | None = None
     id: int | str = 0
+    # Slot-localization mode only: the slot's pre-measured grasp pose in the base
+    # frame (T_base_grasp, 4x4). Set by SlotPerception, consumed by SlotGraspPlanner
+    # in place of the pose->back-projection chain. None in the default pose mode.
+    slot_pose: list[list[float]] | None = None
 
 
 @dataclass

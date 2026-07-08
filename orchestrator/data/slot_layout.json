@@ -1,0 +1,12 @@
+{
+  "name": "default_tray",
+  "_note": "PLACEHOLDER — calibrate against a real frame via the dashboard Slots page (click a slot, then click the image to set its pixel; measure base_xyz_m by teaching the arm to each slot). image_size is the resolution the pixels were calibrated at.",
+  "image_size": [1280, 720],
+  "mask_source": "sam3",
+  "defaults": { "radius_px": 22, "fill_frac": 0.35 },
+  "slots": [
+    { "id": "A1", "expected_class": "anker_kurz",          "pixel": [320, 240], "base_xyz_m": [0.35, -0.10, 0.02], "yaw_deg": 0.0 },
+    { "id": "A2", "expected_class": "buerstenhalter_2polig", "pixel": [640, 240], "base_xyz_m": [0.35, 0.00, 0.02], "yaw_deg": 0.0 },
+    { "id": "A3", "expected_class": "poltopf_kurz",         "pixel": [960, 240], "base_xyz_m": [0.35, 0.10, 0.02], "yaw_deg": 0.0 }
+  ]
+}
