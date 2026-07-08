@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRun } from "../hooks/runContext";
 import { useServiceHealth } from "../hooks/useServiceHealth";
-import { captureScene, runYolo, runSam3, runLocate, SIM_NOT_IMPLEMENTED } from "../lib/api";
-import type { LocateResponse, OverlayKind, Sam3Response, SceneCapture, YoloResponse } from "../lib/types";
+import { captureScene, runYolo, runYoloSeg, runSam3, runLocate, SIM_NOT_IMPLEMENTED } from "../lib/api";
+import type { LocateResponse, OverlayKind, Sam3Response, SceneCapture, YoloResponse, YoloSegResponse } from "../lib/types";
 import { Card } from "../components/ui";
 import ServiceInfo from "../components/ServiceInfo";
 import SourceToggle from "../components/SourceToggle";
@@ -10,14 +10,16 @@ import PartSelector from "../components/PartSelector";
 import SceneView, { type BoxOverlay, type PointOverlay } from "../components/SceneView";
 import { SUPPORTED_PARTS } from "../lib/parts";
 
-type Model = "yolo" | "sam3" | "locateanything";
+type Model = "yolo" | "yoloseg" | "sam3" | "locateanything";
 type Result =
   | { kind: "yolo"; data: YoloResponse }
+  | { kind: "yoloseg"; data: YoloSegResponse }
   | { kind: "sam3"; data: Sam3Response }
   | { kind: "locate"; data: LocateResponse };
 
 const MODELS: { key: Model; label: string }[] = [
-  { key: "yolo", label: "YOLO" },
+  { key: "yolo", label: "YOLO-Det" },
+  { key: "yoloseg", label: "YOLO-Seg" },
   { key: "sam3", label: "SAM 3" },
   { key: "locateanything", label: "LocateAnything" },
 ];
@@ -35,20 +37,23 @@ export default function PerceptionPage() {
 
   const [scene, setScene] = useState<SceneCapture | null>(null);
   const [showDepth, setShowDepth] = useState(false);
-  const [model, setModel] = useState<Model>("sam3");
+  const [model, setModel] = useState<Model>("yoloseg");
   const [prompt, setPrompt] = useState(SUPPORTED_PARTS[0].prompt);
   const [overlayKind, setOverlayKind] = useState<OverlayKind>("masks");
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState<null | "capture" | "infer">(null);
   const [err, setErr] = useState<string | null>(null);
+  const [uploadName, setUploadName] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const needsPrompt = model === "sam3" || model === "locateanything";
+  const hasMasks = model === "sam3" || model === "yoloseg";
   const canInfer = !!scene && !busy && (!needsPrompt || prompt.trim().length > 0);
 
   function pickModel(m: Model) {
     setModel(m);
     setResult(null);
-    setOverlayKind(m === "sam3" ? "masks" : "boxes");
+    setOverlayKind(m === "sam3" || m === "yoloseg" ? "masks" : "boxes");
   }
 
   async function capture() {
@@ -58,7 +63,38 @@ export default function PerceptionPage() {
       const s = await captureScene(run.sourceMode);
       setScene(s);
       setResult(null);
+      setUploadName(null);
       if (!s.depth_b64) setShowDepth(false);
+    } catch (e) {
+      setErr(friendlyError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Debug aid: load a local image straight into the scene so detection can run
+  // against it without the sim/camera. The perception services decode
+  // `image_b64` by content and SceneView reads the image's native size on load,
+  // so only rgb_b64 is needed.
+  async function uploadImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    setBusy("capture");
+    setErr(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result as string);
+        fr.onerror = () => reject(new Error(`Could not read ${file.name}`));
+        fr.readAsDataURL(file);
+      });
+      const b64 = dataUrl.replace(/^data:[^;]+;base64,/, "");
+      if (!b64) throw new Error("Empty or unreadable image file");
+      setScene({ rgb_b64: b64, backend: "upload" });
+      setResult(null);
+      setShowDepth(false);
+      setUploadName(file.name);
     } catch (e) {
       setErr(friendlyError(e));
     } finally {
@@ -72,6 +108,7 @@ export default function PerceptionPage() {
     setErr(null);
     try {
       if (model === "yolo") setResult({ kind: "yolo", data: await runYolo(scene.rgb_b64) });
+      else if (model === "yoloseg") setResult({ kind: "yoloseg", data: await runYoloSeg(scene.rgb_b64) });
       else if (model === "sam3") setResult({ kind: "sam3", data: await runSam3(scene.rgb_b64, prompt) });
       else setResult({ kind: "locate", data: await runLocate(scene.rgb_b64, prompt) });
     } catch (e) {
@@ -85,6 +122,12 @@ export default function PerceptionPage() {
     if (!result) return { boxes: [], masks: [], points: [] };
     if (result.kind === "yolo")
       return { boxes: result.data.detections.map((d) => ({ box: d.box, label: d.label, score: d.score })), masks: [], points: [] };
+    if (result.kind === "yoloseg")
+      return {
+        boxes: result.data.instances.map((i) => ({ box: i.box, label: i.label, score: i.score })),
+        masks: result.data.instances.map((i) => i.mask_b64_png),
+        points: [],
+      };
     if (result.kind === "sam3")
       return {
         boxes: result.data.masks.filter((m) => m.box).map((m) => ({ box: m.box!, label: m.label ?? prompt, score: m.score })),
@@ -101,9 +144,11 @@ export default function PerceptionPage() {
   const count = result
     ? result.kind === "yolo"
       ? result.data.detections.length
-      : result.kind === "sam3"
-        ? result.data.masks.length
-        : result.data.locations.length
+      : result.kind === "yoloseg"
+        ? result.data.instances.length
+        : result.kind === "sam3"
+          ? result.data.masks.length
+          : result.data.locations.length
     : 0;
 
   return (
@@ -126,6 +171,21 @@ export default function PerceptionPage() {
             >
               {busy === "capture" ? "Capturing…" : run.sourceMode === "sim" ? "Render Zivid view" : "Capture Zivid view"}
             </button>
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={busy !== null}
+              title="Load a local image to run detection on (debug)"
+              className="rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-sm font-semibold text-zinc-200 transition hover:bg-zinc-700 disabled:opacity-40"
+            >
+              Upload image
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" onChange={uploadImage} className="hidden" />
+            {uploadName && (
+              <span className="inline-flex max-w-[14rem] items-center gap-1 truncate rounded-md border border-zinc-700 bg-zinc-800/60 px-2 py-1 text-[11px] text-zinc-400" title={uploadName}>
+                <span className="text-zinc-500">uploaded:</span>
+                <span className="truncate font-mono text-zinc-300">{uploadName}</span>
+              </span>
+            )}
             <label className={`flex items-center gap-1.5 text-xs ${scene?.depth_b64 ? "text-zinc-300" : "text-zinc-600"}`}>
               <input
                 type="checkbox"
@@ -136,7 +196,7 @@ export default function PerceptionPage() {
               />
               Depth map
             </label>
-            {result && model === "sam3" && (
+            {result && hasMasks && (
               <div className="ml-auto inline-flex items-center gap-1 rounded-lg border border-zinc-700 p-0.5">
                 {(["masks", "boxes"] as OverlayKind[]).map((k) => (
                   <button
@@ -165,7 +225,7 @@ export default function PerceptionPage() {
             />
           ) : (
             <div className="grid h-64 place-items-center rounded-lg border border-dashed border-zinc-700 text-sm text-zinc-600">
-              No scene yet — capture one to run detection.
+              No scene yet — capture one, or upload an image, to run detection.
             </div>
           )}
 
@@ -205,8 +265,9 @@ export default function PerceptionPage() {
             </div>
           ) : (
             <p className="mb-3 text-[12px] leading-snug text-zinc-500">
-              YOLO uses its fixed COCO-80 vocabulary — it won't recognise the disassembly parts. Use SAM 3 or LocateAnything
-              (open-vocab) with the part selector for those.
+              {model === "yoloseg"
+                ? "YOLO-Seg (parts_seg_v1) — trained instance segmentation over the 18 disassembly parts. Returns boxes + per-instance masks with class labels; no prompt needed."
+                : "YOLO-Det (parts_detmask) — trained detector over the 18 disassembly parts. Returns boxes with class labels; no prompt needed."}
             </p>
           )}
 
@@ -222,7 +283,8 @@ export default function PerceptionPage() {
 
         <Card title="Perception stack">
           <div className="space-y-3">
-            <ServiceInfo serviceKey="yolo" title="YOLO" desc="Fast object detection — COCO-80 boxes." health={health} />
+            <ServiceInfo serviceKey="yolo" title="YOLO-Det" desc="Trained parts detector (parts_detmask) — boxes + class labels." health={health} />
+            <ServiceInfo serviceKey="yoloseg" title="YOLO-Seg" desc="Trained parts segmenter (parts_seg_v1) — boxes + instance masks." health={health} />
             <ServiceInfo serviceKey="sam3" title="SAM 3" desc="Promptable segmentation — text/points/boxes → masks." health={health} />
             <ServiceInfo serviceKey="locateanything" title="LocateAnything" desc="Open-vocab localisation from a text query." health={health} />
           </div>

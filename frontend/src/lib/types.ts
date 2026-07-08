@@ -3,6 +3,7 @@
 export type ServiceKey =
   | "orchestrator"
   | "yolo"
+  | "yoloseg"
   | "sam3"
   | "locateanything"
   | "foundationpose"
@@ -126,6 +127,21 @@ export interface YoloDetection {
 }
 export interface YoloResponse {
   detections: YoloDetection[];
+  width: number;
+  height: number;
+  model: string;
+  inference_ms: number;
+}
+
+export interface YoloSegInstance {
+  box: BBox;
+  mask_b64_png: string; // single-channel (L) PNG, full-res, base64 (no data-URI)
+  score: number;
+  class_id: number;
+  label: string;
+}
+export interface YoloSegResponse {
+  instances: YoloSegInstance[];
   width: number;
   height: number;
   model: string;

@@ -16,8 +16,11 @@ class Settings:
     device: str = field(default_factory=lambda: os.getenv("PERCEPTION_DEVICE", "cuda"))
     weights_dir: str = field(default_factory=lambda: os.getenv("WEIGHTS_DIR", "/weights"))
 
-    # --- YOLO ---
+    # --- YOLO (detection) ---
     yolo_weights: str = field(default_factory=lambda: os.getenv("YOLO_WEIGHTS", "yolo11n.pt"))
+
+    # --- YOLO-Seg (instance segmentation) ---
+    yolo_seg_weights: str = field(default_factory=lambda: os.getenv("YOLO_SEG_WEIGHTS", "yolo11n-seg.pt"))
 
     # --- SAM3 --- (model id / checkpoint filled in once the backend is pinned)
     sam3_model_id: str = field(default_factory=lambda: os.getenv("SAM3_MODEL_ID", ""))

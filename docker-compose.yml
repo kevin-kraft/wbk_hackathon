@@ -54,12 +54,15 @@ services:
     image: wbk-perception:latest
     container_name: wbk-perception
     ports:
-      - "8001:8001" # yolo
+      - "8001:8001" # yolo (detection)
       - "8002:8002" # sam3
       - "8003:8003" # locateanything
+      - "8007:8007" # yoloseg (instance segmentation)
     environment:
       - PERCEPTION_DEVICE=cuda
       - WEIGHTS_DIR=/weights
+      - YOLO_WEIGHTS=${YOLO_WEIGHTS:-yolo11n.pt}
+      - YOLO_SEG_WEIGHTS=${YOLO_SEG_WEIGHTS:-yolo11n-seg.pt}
       - WBK_API_TOKEN=${WBK_API_TOKEN:-}
     volumes:
       - ./weights:/weights

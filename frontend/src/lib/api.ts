@@ -11,6 +11,7 @@ import type {
   ServiceKey,
   SourceMode,
   YoloResponse,
+  YoloSegResponse,
 } from "./types";
 import { serviceUrl, apiToken } from "../config/runtime";
 
@@ -120,6 +121,11 @@ async function postInfer<T>(key: ServiceKey, body: Record<string, unknown>): Pro
 
 export function runYolo(imageB64: string, opts: { conf?: number } = {}): Promise<YoloResponse> {
   return postInfer("yolo", { image_b64: imageB64, conf: opts.conf ?? 0.25 });
+}
+
+/** YOLO-Seg: trained parts instance segmentation (boxes + masks, closed-vocab). */
+export function runYoloSeg(imageB64: string, opts: { conf?: number } = {}): Promise<YoloSegResponse> {
+  return postInfer("yoloseg", { image_b64: imageB64, conf: opts.conf ?? 0.25 });
 }
 
 /** SAM3 text-prompted segmentation (open-vocab). */

@@ -5,7 +5,8 @@ import { Card } from "../components/ui";
 
 const SERVICE_LABEL: Record<ServiceKey, string> = {
   orchestrator: "Orchestrator",
-  yolo: "YOLO",
+  yolo: "YOLO-Det (parts)",
+  yoloseg: "YOLO-Seg (parts)",
   sam3: "SAM 3",
   locateanything: "LocateAnything",
   foundationpose: "FoundationPose",
