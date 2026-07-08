@@ -145,3 +145,20 @@ Rejected alternatives:
   fix below): 3 poses in 55ms, distinct per-part yaw, `stage='2d-plane'`.
   Not yet verified: real-robot grasp success using 2D-mode poses (this ADR
   covers the pose-service change only, not a grasp-execution evaluation).
+
+## Update (2026-07-08, commit `2485997`) — orchestrator wiring gap closed
+
+The "not yet wired" gap noted above (`HttpPose` never set `pipeline`, so the
+loop always requested the FoundationPose-served default `'rgbd'`) is closed:
+`OrchestratorConfig` gained `pose_pipeline` (env `POSE_PIPELINE`, default
+`rgbd`) and `gigapose_url` (env `GIGAPOSE_URL`); `HttpPose.estimate()` now
+sends `pipeline` (plus `plane_z` when set) and routes `2d`/`rgb` requests to
+`gigapose_url` instead of `pose_url`. Overridable per-run via `POST
+/run?pose_pipeline=` / `GET /events/run?pose_pipeline=`, mirroring the
+existing `?target=` override — no restart needed to switch. The dashboard
+gained a matching Pose selector (6DoF / 6DoF·RGB / 2D) in `RunControls`. See
+[System: Orchestrator](../System/orchestrator.md) "Pose pipeline selection"
+and [System: Dashboard](../System/dashboard.md). Real-robot grasp success
+using 2D-mode poses end-to-end through the orchestrator is still
+unverified — this update closes the *wiring* gap, not a grasp-execution
+evaluation.

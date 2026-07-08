@@ -78,6 +78,49 @@ class FileBackend(Backend):
         return RawCapture(rgb=rgb, depth_mm=depth_mm, K=self.settings.k_override)
 
 
+class RgbCamBackend(Backend):
+    """A plain 2D camera via OpenCV — the new depth-less setup for slot
+    localization. Returns RGB only (depth=None, K=None); the slot pipeline never
+    needs depth or intrinsics. `SCENE_CAMERA_INDEX` selects the device (an int
+    index, a /dev path, or a stream URL)."""
+
+    name = "rgbcam"
+
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings)
+        self._cap = None
+
+    def _source(self):
+        idx = self.settings.cam_index
+        return int(idx) if str(idx).isdigit() else idx
+
+    def _open(self):
+        import cv2
+
+        if self._cap is None or not self._cap.isOpened():
+            self._cap = cv2.VideoCapture(self._source())
+        if not self._cap.isOpened():
+            raise RuntimeError(f"could not open camera {self.settings.cam_index!r}")
+        return self._cap
+
+    @property
+    def ready(self) -> bool:
+        try:
+            return self._open().isOpened()
+        except Exception:
+            return False
+
+    def capture(self) -> RawCapture:
+        import cv2
+
+        cap = self._open()
+        ok, bgr = cap.read()
+        if not ok or bgr is None:
+            raise RuntimeError(f"camera {self.settings.cam_index!r} returned no frame")
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        return RawCapture(rgb=np.ascontiguousarray(rgb), depth_mm=None, K=self.settings.k_override)
+
+
 class ZividBackend(Backend):
     """Real Zivid capture (Jetson, camera on USB3/GigE). Needs the `zivid` SDK."""
 
@@ -143,6 +186,8 @@ def make_backend(settings: Settings) -> Backend:
         return MockBackend(settings)
     if name == "file":
         return FileBackend(settings)
+    if name == "rgbcam":
+        return RgbCamBackend(settings)
     if name == "zivid":
         return ZividBackend(settings)
     raise ValueError(f"unknown SCENE_CAMERA_BACKEND: {settings.backend!r}")

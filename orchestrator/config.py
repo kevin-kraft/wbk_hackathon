@@ -59,6 +59,7 @@ class OrchestratorConfig:
     perception_yolo_url: str = field(default_factory=lambda: os.getenv("PERCEPTION_YOLO_URL", "http://localhost:8001"))
     perception_sam3_url: str = field(default_factory=lambda: os.getenv("PERCEPTION_SAM3_URL", "http://localhost:8002"))
     perception_locate_url: str = field(default_factory=lambda: os.getenv("PERCEPTION_LOCATE_URL", "http://localhost:8003"))
+    perception_yoloseg_url: str = field(default_factory=lambda: os.getenv("PERCEPTION_YOLOSEG_URL", "http://localhost:8007"))
     pose_url: str = field(default_factory=lambda: os.getenv("POSE_URL", "http://localhost:8004"))  # foundationpose
     # GigaPose endpoint — used for the CAD-free 'pipeline=2d' planar pose (which
     # FoundationPose does not implement). Falls back to pose_url if unset.
@@ -75,6 +76,23 @@ class OrchestratorConfig:
     pose_plane_z: float | None = field(
         default_factory=lambda: (float(os.environ["POSE_PLANE_Z"]) if os.getenv("POSE_PLANE_Z") else None)
     )
+    # Localization mode — how the loop turns a scene into a grasp:
+    #   "pose"  — 6DoF/2D pose stage + back-projection (default; the original path)
+    #   "slots" — depth-free slot lookup: SAM3 occupancy of a calibrated tray ->
+    #             the filled slot's pre-measured base pose. No pose stage, no depth.
+    #             See slots.py + clients/slot_perception.py. For the new arm+camera
+    #             setup that has no 3D. Overridable per-run via /run?localization=.
+    localization_mode: str = field(default_factory=lambda: os.getenv("LOCALIZATION_MODE", "pose").strip().lower())
+    # Slot layout (pixel centres + base poses), calibrated once against a real
+    # frame. Defaults to the file packaged with the image; edited via /slots/layout.
+    slot_layout_path: str = field(default_factory=lambda: os.getenv(
+        "SLOT_LAYOUT_PATH",
+        os.path.join(os.path.dirname(__file__), "data", "slot_layout.json"),
+    ))
+    # Which masks drive slot occupancy: "sam3" (open-vocab text prompt per class,
+    # default) or "yoloseg" (one closed-vocab pass, labelled instances).
+    slot_mask_source: str = field(default_factory=lambda: os.getenv("SLOT_MASK_SOURCE", "").strip().lower())
+
     damage_url: str = field(default_factory=lambda: os.getenv("DAMAGE_URL", "http://localhost:8006"))
     # Scene RGB-D camera (Zivid) capture service. Empty = use the file/static
     # stand-in (StaticSceneCamera) instead of the HTTP client.

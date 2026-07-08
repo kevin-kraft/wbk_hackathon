@@ -5,7 +5,7 @@
 // EventSource auto-reconnects and would kick off another run.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { LoopEvent, PosePipeline, RobotTarget, RunStats } from "../lib/types";
+import type { LocalizationMode, LoopEvent, PosePipeline, RobotTarget, RunStats } from "../lib/types";
 import { runStreamUrl } from "../lib/api";
 
 export type RunStatus = "idle" | "running" | "done" | "error";
@@ -19,7 +19,14 @@ export interface RunStreamState {
   // Robot the server actually drove this run (from the SSE "start" event) — may
   // differ from the requested toggle if ROBOT_TARGET was forced server-side.
   activeTarget: string | null;
-  start: (dryRun: boolean, delaySeconds: number, target?: RobotTarget, product?: string, posePipeline?: PosePipeline) => void;
+  start: (
+    dryRun: boolean,
+    delaySeconds: number,
+    target?: RobotTarget,
+    product?: string,
+    posePipeline?: PosePipeline,
+    localization?: LocalizationMode,
+  ) => void;
   stop: () => void;
   reset: () => void;
 }
@@ -52,7 +59,14 @@ export function useRunStream(): RunStreamState {
   }, [closeSource]);
 
   const start = useCallback(
-    (dryRun: boolean, delaySeconds: number, target?: RobotTarget, product?: string, posePipeline?: PosePipeline) => {
+    (
+      dryRun: boolean,
+      delaySeconds: number,
+      target?: RobotTarget,
+      product?: string,
+      posePipeline?: PosePipeline,
+      localization?: LocalizationMode,
+    ) => {
       closeSource();
       setEvents([]);
       setStats(null);
@@ -60,7 +74,7 @@ export function useRunStream(): RunStreamState {
       setActiveTarget(null);
       setStatus("running");
 
-      const es = new EventSource(runStreamUrl(dryRun, delaySeconds, target, product, posePipeline));
+      const es = new EventSource(runStreamUrl(dryRun, delaySeconds, target, product, posePipeline, localization));
       esRef.current = es;
 
       es.addEventListener("start", (e) => {

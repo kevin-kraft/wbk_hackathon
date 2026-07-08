@@ -9,6 +9,8 @@
 - [ADR 0011: LLM action selector, constrained vocabulary](../Decisions/0011-llm-action-selector-constrained-vocabulary.md) — the `GUARDRAIL` event `PlanProgress`/the event log surface
 - [ADR 0014: robot target selection (real \| sim \| both)](../Decisions/0014-robot-target-real-sim-both.md) — the Real/Sim/Both toggle this doc's "Sim / digital-twin UI" section covers
 - [ADR 0015: YOLO-Seg sidecar container, no rebuild](../Decisions/0015-yoloseg-sidecar-container-no-rebuild.md) — the deployment behind the `yoloseg` service this doc's Perception page section calls
+- [ADR 0016: GigaPose 2D (planar) pose mode](../Decisions/0016-gigapose-2d-planar-pose-mode.md) — the pose pipeline the "Pose pipeline selector" section below picks between
+- [ADR 0017: gray-world white balance + lowered detection confidence](../Decisions/0017-grayworld-white-balance-sim-to-real.md) — the frontend-side default-conf and SAM3/LocateAnything prompt changes this doc's Perception page section reflects
 - `contracts/simulation_api.md` / `contracts/sim_scene_capture.md` — the Isaac Sim command-bus + (draft, unimplemented) scene-capture surfaces the sim-side UI calls
 - `frontend/README.md` (in-repo) — the module's own README; this doc adds the `.agent/` cross-reference layer on top, not a duplicate
 
@@ -37,10 +39,10 @@ and is verified clean.
 
 | Page | File | What it shows |
 |---|---|---|
-| Dashboard | `DashboardPage.tsx` | Run controls (start/stop, dry-run toggle, pace/delay, the Real/Sim/Both robot-target toggle, `ProductSelector` — see "Plan mode UI" below), the 7-stage pipeline tracker (`StageTracker`) driven by the *latest* live event, `PlanProgress` (plan-driven runs only), scene camera (real `MjpegView` or, in Sim source mode, a rendered preview — see "Sim / digital-twin UI" below), grip telemetry, a next-part text prompt box, bin tallies, and the full event log. |
+| Dashboard | `DashboardPage.tsx` | Run controls (start/stop, dry-run toggle, pace/delay, the Real/Sim/Both robot-target toggle, the 6DoF/6DoF·RGB/2D pose-pipeline toggle — added 2026-07-08, see "Pose pipeline selector" below, `ProductSelector` — see "Plan mode UI" below), the 7-stage pipeline tracker (`StageTracker`) driven by the *latest* live event, `PlanProgress` (plan-driven runs only), scene camera (real `MjpegView` or, in Sim source mode, a rendered preview — see "Sim / digital-twin UI" below), grip telemetry, a next-part text prompt box, bin tallies, and the full event log. |
 | Perception | `PerceptionPage.tsx` | **Rewritten 2026-07-08** — no longer a stub: capture a scene (real Zivid or sim render, via `SourceToggle`) or **upload a local image** (debug aid, added 2026-07-08 — see "YOLO-Seg + manual image upload" below), pick a target part (`PartSelector`) or a custom prompt, run YOLO-Det / YOLO-Seg / SAM 3 / LocateAnything inference, and see the result rendered as box/mask/point overlays on the captured frame (`SceneView`) — see "Sim / digital-twin UI" and "YOLO-Seg + manual image upload" below. Detection overlays are no longer future work. |
 | Inspection | `InspectionPage.tsx` | Inspection camera, the damage-VLM endpoint, a per-part OK/damaged verdicts table, and bin state. |
-| Settings | `SettingsPage.tsx` | Live-editable text fields for every service endpoint (now including the simulator's `movementSim`/`gripSim` and the Zivid `sceneCapture` service) and both camera stream URLs, plus run defaults (dry-run, pace, and — added 2026-07-08 — the default robot target) and the shared `apiToken` (see "Auth token" below); "Save & reload" persists to `localStorage`, "Reset to config.json" clears the override. |
+| Settings | `SettingsPage.tsx` | Live-editable text fields for every service endpoint (now including the simulator's `movementSim`/`gripSim` and the Zivid `sceneCapture` service) and both camera stream URLs, plus run defaults (dry-run, pace, the default robot target, and — added 2026-07-08, see "Pose pipeline selector" below — the default pose pipeline) and the shared `apiToken` (see "Auth token" below); "Save & reload" persists to `localStorage`, "Reset to config.json" clears the override. |
 
 Shared building blocks in `frontend/src/components/`: `Layout`, `StageTracker`
 (maps loop state → one of the 7 canonical stages, see `lib/stages.ts`),
@@ -129,7 +131,21 @@ operator drive/inspect the Isaac Sim digital twin from the browser:
   (operator decision, 2026-07-07), plus a "Custom…" free-text escape hatch.
   Does not apply to YOLO, which has a fixed closed (COCO-80, now custom-
   trained 18-class, see [System: Training](./training.md)) vocabulary with no
-  prompt.
+  prompt. **`anker`'s actual prompt string, fixed 2026-07-08 (commit
+  `fcc2773`):** `SUPPORTED_PARTS`'s `id` is still `"anker"` (label still
+  "Anker"), but the `prompt` sent to SAM 3/LocateAnything is now `"copper
+  part"` — the German part name `"anker"` didn't match either open-vocab
+  model's training distribution (0 masks); the English open-vocab concept
+  does (12 masks, verified against a real frame) — see [ADR
+  0017](../Decisions/0017-grayworld-white-balance-sim-to-real.md).
+- **Default detection confidence lowered, 0.25 → 0.10** (`runYolo()`/
+  `runYoloSeg()` in `lib/api.ts`, commit `fcc2773`) — the trained parts
+  models score lower on real Zivid frames than on synthetic validation data
+  (sim-to-real gap), so 0.25 hid almost every real detection. Both helpers
+  still accept a per-call `opts.conf` override. See [ADR
+  0017](../Decisions/0017-grayworld-white-balance-sim-to-real.md) for the
+  companion fix (gray-world white balance on the Zivid capture) and why this
+  is a stopgap, not a durable fix.
 - **`SceneView`** (`frontend/src/components/SceneView.tsx`) — renders a
   captured RGB frame plus overlays in the image's **native pixel space**
   (an `<svg viewBox>` sized to the loaded image's natural dimensions) so
@@ -142,6 +158,34 @@ operator drive/inspect the Isaac Sim digital twin from the browser:
 - **No new frontend test coverage.** `SceneView`, `SourceToggle`,
   `PartSelector`, and the rewritten `PerceptionPage.tsx` capture/inference
   flow have no Vitest tests as of this capture — see "Test suite" below.
+
+## Pose pipeline selector (`RunControls`, added 2026-07-08, commit `2485997`)
+
+Mirrors the orchestrator's `pose_pipeline`/`?pose_pipeline=` override (see
+[System: Orchestrator](./orchestrator.md) "Pose pipeline selection" and
+[ADR 0016](../Decisions/0016-gigapose-2d-planar-pose-mode.md)) — closes the
+wiring gap that ADR flagged as still-open ("the orchestrator does not yet
+call `pipeline='2d'`"), the operator can now pick it from the dashboard:
+
+- **Pose selector** (`RunControls.tsx`, next to the robot-target toggle) —
+  three buttons: `6DoF` (FoundationPose, depth, default), `6DoF·RGB`
+  (GigaPose, RGB-only), `2D` (GigaPose CAD-free planar pose — no templates
+  needed). Disabled under the same conditions as the robot-target toggle
+  (run in progress, or *Dry run* checked — mocks ignore the pipeline).
+  `onStart` passes `dryRun ? undefined : posePipeline` through to
+  `useRunStream.start()` → `runStreamUrl()`'s `&pose_pipeline=` param
+  (`DashboardPage.tsx`), same pattern as `robotTarget`.
+- **State** — `posePipeline`/`setPosePipeline` live in `RunProvider`
+  (`hooks/runContext.tsx`), shared across pages the same way `robotTarget`
+  is; initial value comes from `RuntimeConfig.run.posePipeline`
+  (`config/runtime.ts`, new field, default `"rgbd"`).
+- **Settings default** — a new "Pose" dropdown under Settings → Run defaults
+  (`SettingsPage.tsx`), persisted the same way as the other run defaults
+  (`localStorage` override via "Save & reload").
+- **`PosePipeline` type** (`lib/types.ts`) — `"rgbd" | "rgb" | "2d"`, added
+  alongside `RobotTarget`; `RuntimeConfig.run` gained a `posePipeline` field.
+- **No new frontend test coverage** for this selector as of this capture —
+  see "Test suite" below.
 
 ## YOLO-Seg + manual image upload (added 2026-07-08)
 

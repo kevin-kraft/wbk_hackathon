@@ -7,7 +7,8 @@
 - [ADR: pose contract reuses kip-pose-viewer](../Decisions/0004-pose-contract-reuses-kip-pose-viewer.md)
 - [ADR: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why SSE + CORS exist at all
 - [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — why every `POST` contract below is gated, the threat model, and its limits
-- [ADR 0016: GigaPose 2D (planar) pose mode](../Decisions/0016-gigapose-2d-planar-pose-mode.md) — the `pipeline='2d'` addition to Contract 2
+- [ADR 0016: GigaPose 2D (planar) pose mode](../Decisions/0016-gigapose-2d-planar-pose-mode.md) — the `pipeline='2d'` addition to Contract 2, now wired into the orchestrator (2026-07-08 update)
+- [ADR 0017: gray-world white balance + lowered detection confidence](../Decisions/0017-grayworld-white-balance-sim-to-real.md) — the debugging session that found the `locateanything`/CORS bugs below
 - [SOP: deploying the pose services (podman)](../SOP/deploy_pose_podman.md) — required auth on the deployed pose services (stricter than perception's), the no-CAD-templates reality behind `pipeline='2d'`
 - [SOP: running the services](../SOP/running_services.md)
 
@@ -124,9 +125,15 @@ templates for this project's parts (`GET /health`'s `classes: []`) — see
 `GigaPoseRunner` entirely (`pose/shared/planar.py`'s `planar_pose()`,
 numpy-only) and returns the same `ObjectPose` shape — a client cannot tell
 from the response shape alone which pipeline produced a pose; check `stage`.
-A `pipeline='rgb'`/`'rgbd'` request against a GigaPose instance whose 6DoF
-model failed to load (or was never asset-ready) now gets a clear `503`
-instead of the service failing to start at all — see the same ADR for the
+**The orchestrator's `HttpPose` client sends `pipeline` explicitly as of
+2026-07-08** (`OrchestratorConfig.pose_pipeline`, default `rgbd`,
+per-run-overridable via `?pose_pipeline=` — see [System:
+Orchestrator](./orchestrator.md) "Pose pipeline selection" and [ADR 0016](../Decisions/0016-gigapose-2d-planar-pose-mode.md)'s
+2026-07-08 update); a caller building requests directly against this
+contract still gets `PoseRequest`'s schema default (`'rgbd'`) if it omits
+the field. A `pipeline='rgb'`/`'rgbd'` request against a GigaPose instance
+whose 6DoF model failed to load (or was never asset-ready) now gets a clear
+`503` instead of the service failing to start at all — see the same ADR for the
 graceful-degrade change in `gigapose_svc/app.py`'s startup lifespan.
 
 `GET /health` → `PoseHealth{status, service, model, device, loaded, classes}`.
@@ -237,6 +244,20 @@ model)` wraps this into a FastAPI app: a lifespan hook that calls
 `model.load()` at startup / `model.unload()` at shutdown, plus `/health`, `/`,
 and a catch-all exception handler that returns `{"error": type, "detail": str}`
 with a 500. Each service then adds its own typed `/infer` route in `main.py`.
+
+**Gotcha, fixed 2026-07-08 (commit `fcc2773`):** a handler registered for
+the bare `Exception` class runs in Starlette's outermost
+`ServerErrorMiddleware`, **above** the CORS middleware in the stack — so its
+response never got an `Access-Control-Allow-Origin` header, and the browser
+reported every service-side 500 as an opaque "network error" instead of an
+inspectable HTTP 500. The handler now explicitly adds
+`Access-Control-Allow-Origin: *` to its response. If you add a new
+top-level exception handler anywhere in this repo's FastAPI apps, remember
+CORS middleware does not apply to it automatically — see [ADR
+0017](../Decisions/0017-grayworld-white-balance-sim-to-real.md) for the
+debugging session this was found in and [System:
+Architecture](./architecture.md) for the paired `locateanything`
+`use_cache=True` bug it was masking.
 
 To add a new perception model: subclass `BasePerceptionModel` in
 `services/<name>/model.py` (implement `load()`/`infer()`), add

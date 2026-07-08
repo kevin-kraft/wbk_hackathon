@@ -28,14 +28,21 @@ from .models import LoopEvent
 app = FastAPI(title="orchestrator")
 
 
-def _config_for(target: str | None, pose_pipeline: str | None = None) -> OrchestratorConfig:
-    """Base env config, with the robot target + pose pipeline optionally overridden
-    per-run so the dashboard can flip real/sim/both or 6DoF/2D without restarting."""
+def _config_for(
+    target: str | None,
+    pose_pipeline: str | None = None,
+    localization: str | None = None,
+) -> OrchestratorConfig:
+    """Base env config, with the robot target / pose pipeline / localization mode
+    optionally overridden per-run so the dashboard can flip real/sim/both, 6DoF/2D,
+    or pose/slots localization without restarting."""
     config = OrchestratorConfig()
     if target:
         config.robot_target = target.strip().lower()
     if pose_pipeline:
         config.pose_pipeline = pose_pipeline.strip().lower()
+    if localization:
+        config.localization_mode = localization.strip().lower()
     return config
 
 # The dashboard is a separate static app that may be served from any host, so it
@@ -65,6 +72,7 @@ def run(
     target: str | None = None,
     product: str | None = None,
     pose_pipeline: str | None = None,
+    localization: str | None = None,
 ) -> dict:
     """Run a full loop and return all events + the final stats at once (no streaming).
 
@@ -76,7 +84,7 @@ def run(
     the CAD-free planar pose (GigaPose), useful when 6DoF templates are missing.
     """
     events: list[dict] = []
-    config = _config_for(target, pose_pipeline)
+    config = _config_for(target, pose_pipeline, localization)
     orchestrator = build_orchestrator(config=config, dry_run=dry_run, on_event=lambda e: events.append(_event_dict(e)))
     stats = orchestrator.run(product=product)
     return {
@@ -84,6 +92,7 @@ def run(
         "target": config.robot_target,
         "product": product,
         "pose_pipeline": config.pose_pipeline,
+        "localization": config.localization_mode,
         "events": events,
     }
 
@@ -136,6 +145,56 @@ def plan_preview(product: str, dry_run: bool = False) -> dict:
     }
 
 
+@app.get("/slots/layout", dependencies=[Depends(require_token)])
+def slots_layout() -> dict:
+    """The current tray slot layout (pixel centres + base poses) for calibration
+    + visualization on the dashboard Slots page."""
+    from .slots import load_slot_layout
+
+    config = OrchestratorConfig()
+    return load_slot_layout(config.slot_layout_path).to_dict()
+
+
+@app.post("/slots/layout", dependencies=[Depends(require_token)])
+def save_slots_layout(layout: dict) -> dict:
+    """Persist an edited slot layout (dashboard calibration: re-placed pixels,
+    measured base poses). Overwrites SLOT_LAYOUT_PATH."""
+    from .slots import layout_from_dict, save_slot_layout
+
+    config = OrchestratorConfig()
+    parsed = layout_from_dict(layout)  # validates shape before writing
+    save_slot_layout(config.slot_layout_path, parsed)
+    return {"status": "saved", "slots": len(parsed.slots), "path": config.slot_layout_path}
+
+
+@app.post("/slots/occupancy", dependencies=[Depends(require_token)])
+def slots_occupancy(body: dict) -> dict:
+    """Score every slot's occupancy for a given RGB frame — the introspection
+    behind slot localization. Body: {image_b64, mask_source?}. Returns per-slot
+    {filled, detected_class, fill_score, identity_ok, ...}."""
+    from fastapi import HTTPException
+
+    from .clients.http_perception import HttpPerception
+    from .clients.slot_perception import SlotPerception
+    from .models import SceneFrame
+
+    image_b64 = body.get("image_b64")
+    if not image_b64:
+        raise HTTPException(status_code=422, detail="image_b64 is required")
+    config = OrchestratorConfig()
+    if body.get("mask_source"):
+        config.slot_mask_source = str(body["mask_source"]).strip().lower()
+    slot_perception = SlotPerception(config, HttpPerception(config))
+    frame = SceneFrame(rgb_b64=image_b64)
+    statuses = slot_perception.occupancy(frame)
+    return {
+        "mask_source": slot_perception.mask_source,
+        "image_size": list(slot_perception.layout.image_size) if slot_perception.layout.image_size else None,
+        "filled": sum(1 for s in statuses if s.filled),
+        "slots": [s.to_dict() for s in statuses],
+    }
+
+
 def _sse(data: dict, event: str | None = None) -> str:
     """Format one Server-Sent Event frame."""
     prefix = f"event: {event}\n" if event else ""
@@ -145,7 +204,7 @@ def _sse(data: dict, event: str | None = None) -> str:
 @app.get("/events/run", dependencies=[Depends(require_token)])
 async def events_run(
     dry_run: bool = False, delay: float = 0.0, target: str | None = None, product: str | None = None,
-    pose_pipeline: str | None = None,
+    pose_pipeline: str | None = None, localization: str | None = None,
 ) -> StreamingResponse:
     """Run a loop and stream each stage event as it happens (SSE).
 
@@ -158,7 +217,7 @@ async def events_run(
     """
     q: queue.Queue = queue.Queue()
     sentinel = object()
-    config = _config_for(target, pose_pipeline)
+    config = _config_for(target, pose_pipeline, localization)
 
     def on_event(event: LoopEvent) -> None:
         q.put(("event", _event_dict(event)))

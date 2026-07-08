@@ -6,6 +6,7 @@ import ServiceHealthStrip from "./ServiceHealthStrip";
 const TABS = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/perception", label: "Perception" },
+  { to: "/slots", label: "Slots" },
   { to: "/inspection", label: "Inspection" },
   { to: "/settings", label: "Settings" },
 ];

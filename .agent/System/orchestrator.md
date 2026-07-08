@@ -13,6 +13,7 @@
 - [ADR: robot_control integration](../Decisions/0010-robot-control-integration.md) — why `HttpMovement` still can't drive it yet
 - [ADR: LLM action selector, constrained vocabulary](../Decisions/0011-llm-action-selector-constrained-vocabulary.md) — why the action-synthesis LLM can only select, never author, arm poses
 - [ADR: robot target selection (real \| sim \| both)](../Decisions/0014-robot-target-real-sim-both.md) — why sim is a mirrored digital twin, not a peer, and why `IsaacSimMovement` is a dedicated adapter
+- [ADR 0016: GigaPose 2D (planar) pose mode](../Decisions/0016-gigapose-2d-planar-pose-mode.md) — the CAD-free pose pipeline "Pose pipeline selection" below wires into the loop
 - `contracts/simulation_api.md` — the Isaac Sim command-bus surface `IsaacSimMovement` speaks, and the named-pose teach-table gap
 - [Tasks/archive: ERP-driven, LLM-orchestrated disassembly plan (PRD)](../Tasks/archive/llm_orchestrated_disassembly_plan.md) — the shipped vision this doc's "Plan mode" section reflects
 - [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
@@ -237,7 +238,8 @@ why it was chosen and what it's meant to buy.
 
 Env-driven `OrchestratorConfig` dataclass: URLs for the repo's own stages
 (`PERCEPTION_YOLO_URL`, `PERCEPTION_SAM3_URL`, `PERCEPTION_LOCATE_URL`,
-`POSE_URL`, `DAMAGE_URL`) plus the two teammate-owned endpoints
+`POSE_URL`, `DAMAGE_URL`, and — added 2026-07-08, see "Pose pipeline
+selection" below — `GIGAPOSE_URL`) plus the two teammate-owned endpoints
 (`MOVEMENT_URL` default `http://jetson.local:9000`, `GRIP_URL` default
 `http://jetson.local:9001`); the simulator endpoints (`MOVEMENT_SIM_URL`,
 `GRIP_SIM_URL`, both default empty) and `ROBOT_TARGET` (default `real`) that
@@ -324,6 +326,45 @@ perception/pose from a simulated camera frame is a separate, still-open
 problem (`contracts/sim_scene_capture.md`; the sim's `GET_ZIVID_DATA`
 command is unimplemented), unaffected by `robot_target`.
 
+## Pose pipeline selection (rgbd | rgb | 2d) — `clients/http_pose.py`
+
+Added 2026-07-08 (commit `2485997`), same per-run-override shape as
+"Robot target selection" above. `config.pose_pipeline` (env
+`POSE_PIPELINE`, default `rgbd`) picks which pose contract value
+`HttpPose.estimate()` sends and which URL it targets:
+
+| `pose_pipeline` | Sent as `PoseRequest.pipeline` | Target URL | Notes |
+|---|---|---|---|
+| `rgbd` (default) | `"rgbd"` | `config.pose_url` (FoundationPose) | 6DoF with depth |
+| `rgb` | `"rgb"` | `config.gigapose_url` | 6DoF, GigaPose, RGB-only |
+| `2d` | `"2d"` | `config.gigapose_url` | CAD-free planar pose from the mask — no templates needed; see [ADR 0016](../Decisions/0016-gigapose-2d-planar-pose-mode.md) |
+
+`config.gigapose_url` (env `GIGAPOSE_URL`, default `http://localhost:8005`)
+falls back to `pose_url` if unset. `config.pose_plane_z` (env
+`POSE_PLANE_Z`, default `None`) is threaded through to the request body as
+`plane_z` only when `pose_pipeline == "2d"` — the camera-frame table depth
+(metres) `planar_pose()` falls back to when no per-mask depth is available
+(see [System: Integration Points](./integration_points.md) Contract 2).
+
+Overridable **per-run**, no restart, exactly like `robot_target`: `POST
+/run?pose_pipeline=<rgbd|rgb|2d>` and `GET
+/events/run?pose_pipeline=<rgbd|rgb|2d>` (`_config_for()` in
+`orchestrator/app.py`) patch `OrchestratorConfig.pose_pipeline` before
+`build_orchestrator()`. The `/run` response echoes back `pose_pipeline` so a
+caller can confirm what was actually used. The dashboard's `RunControls`
+gained a matching Pose selector (6DoF / 6DoF·RGB / 2D, `PosePipeline` type
+in `frontend/src/lib/types.ts`) — see [System: Dashboard](./dashboard.md).
+
+**Why this exists:** the deployed GigaPose instance has no CAD templates
+for this project's parts, so `rgb`/`rgbd` 503 against it — `pipeline='2d'`
+was the only pose path that could get a real pose against real parts (see
+[ADR 0016](../Decisions/0016-gigapose-2d-planar-pose-mode.md)), but before
+this change nothing in the loop could actually request it — `HttpPose`
+always sent the schema default (`rgbd`) and always called `pose_url`
+(FoundationPose). This closes that wiring gap; it does not itself verify a
+real-robot grasp using a 2D-mode pose end to end — see [System:
+Architecture](./architecture.md) "Not yet built".
+
 ## Auth (`orchestrator/auth.py`, `orchestrator/config.py`)
 
 The orchestrator is **both enforcer and caller** for the shared-token auth
@@ -401,14 +442,18 @@ rationale):
   integration while teammate-owned pieces are still in progress. See
   [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md).
 - **`orchestrator.app:app`** (`orchestrator/app.py`, FastAPI, port `:8000`) —
-  `GET /health` (open, no token); `POST /run?dry_run=true|false&product=<id>`
+  `GET /health` (open, no token); `POST
+  /run?dry_run=true|false&target=<real|sim|both>&product=<id>&pose_pipeline=<rgbd|rgb|2d>`
   builds an orchestrator via `build_orchestrator()` and returns
-  `{"stats": ..., "target": ..., "product": ..., "events": [...]}`. This is
-  what `docker-compose.yml`'s `orchestrator` service runs in production
-  (`dry_run=false` against the live containers + Jetson endpoints). Gated by
-  `Depends(require_token)` when `WBK_API_TOKEN` is set — see "Auth" above.
-  `product` (added 2026-07-08) switches to a plan-driven run — see "Plan
-  mode" above; omitted or empty runs the original fixed-mode loop.
+  `{"stats": ..., "target": ..., "product": ..., "pose_pipeline": ...,
+  "events": [...]}`. This is what `docker-compose.yml`'s `orchestrator`
+  service runs in production (`dry_run=false` against the live containers +
+  Jetson endpoints). Gated by `Depends(require_token)` when `WBK_API_TOKEN`
+  is set — see "Auth" above. `product` (added 2026-07-08) switches to a
+  plan-driven run — see "Plan mode" above; omitted or empty runs the
+  original fixed-mode loop. `pose_pipeline` (added 2026-07-08) overrides
+  which pose contract/service the run uses — see "Pose pipeline selection"
+  above; omitted uses the server's `POSE_PIPELINE` env (default `rgbd`).
 - **`GET /products`** (`orchestrator/app.py`, added 2026-07-08) — lists the
   operator-selectable products from the (mock-)ERP dataset (`{"products":
   [{"id", "name", "description", "parts": [...]}]}`), for the dashboard's
@@ -422,9 +467,9 @@ rationale):
   `MockPlanProvider` if `dry_run=true`); 404 (not the generic 500) on an
   unknown product, since `PlanProvider.get_plan()` raises `ValueError` for
   that case specifically. Token-gated.
-- **`GET /events/run?dry_run=<bool>&delay=<seconds>&target=<real|sim|both>&product=<id>`**
-  (`orchestrator/app.py`, added alongside the dashboard; `product` param
-  added 2026-07-08) — the same loop, but **streamed** as Server-Sent Events
+- **`GET /events/run?dry_run=<bool>&delay=<seconds>&target=<real|sim|both>&product=<id>&pose_pipeline=<rgbd|rgb|2d>`**
+  (`orchestrator/app.py`, added alongside the dashboard; `product` and
+  `pose_pipeline` params added 2026-07-08) — the same loop, but **streamed** as Server-Sent Events
   instead of collected into one response: this is what the
   [dashboard](./dashboard.md) consumes to narrate the loop live. The loop
   runs synchronously in a daemon worker thread (`threading.Thread`, name

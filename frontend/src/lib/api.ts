@@ -3,6 +3,7 @@
 import type {
   ErpProduct,
   HealthStatus,
+  LocalizationMode,
   LocateResponse,
   PlanPreview,
   PosePipeline,
@@ -10,6 +11,8 @@ import type {
   Sam3Response,
   SceneCapture,
   ServiceKey,
+  SlotLayout,
+  SlotOccupancyResponse,
   SourceMode,
   YoloResponse,
   YoloSegResponse,
@@ -58,12 +61,14 @@ export async function runOnce(
   target?: RobotTarget,
   product?: string,
   posePipeline?: PosePipeline,
+  localization?: LocalizationMode,
 ): Promise<{ stats: Record<string, number>; target?: string; events: unknown[] }> {
   const base = serviceUrl("orchestrator");
   let url = `${base}/run?dry_run=${dryRun}`;
   if (target) url += `&target=${target}`;
   if (product) url += `&product=${encodeURIComponent(product)}`;
   if (posePipeline) url += `&pose_pipeline=${posePipeline}`;
+  if (localization) url += `&localization=${localization}`;
   const res = await fetch(url, { method: "POST", headers: authHeaders() });
   if (!res.ok) throw new Error(`run failed: HTTP ${res.status}`);
   return res.json();
@@ -78,6 +83,7 @@ export function runStreamUrl(
   target?: RobotTarget,
   product?: string,
   posePipeline?: PosePipeline,
+  localization?: LocalizationMode,
 ): string {
   const base = serviceUrl("orchestrator");
   const delay = Math.max(0, delaySeconds);
@@ -85,6 +91,7 @@ export function runStreamUrl(
   if (target) url += `&target=${target}`;
   if (product) url += `&product=${encodeURIComponent(product)}`;
   if (posePipeline) url += `&pose_pipeline=${posePipeline}`;
+  if (localization) url += `&localization=${localization}`;
   const t = apiToken();
   if (t) url += `&token=${encodeURIComponent(t)}`;
   return url;
@@ -163,6 +170,45 @@ export async function captureScene(mode: SourceMode): Promise<SceneCapture> {
   const res = await fetch(`${base}/simulation/scene/capture`, { method: "POST", headers: authHeaders() });
   if (res.status === 404 || res.status === 501) throw new Error(SIM_NOT_IMPLEMENTED);
   if (!res.ok) throw new Error(`sim capture failed: HTTP ${res.status}`);
+  return res.json();
+}
+
+// --- Slot localization ---------------------------------------------------- //
+
+/** GET {orchestrator}/slots/layout — the calibrated tray layout. */
+export async function fetchSlotLayout(): Promise<SlotLayout> {
+  const base = serviceUrl("orchestrator");
+  const res = await fetch(`${base}/slots/layout`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`slot layout failed: HTTP ${res.status}`);
+  return res.json();
+}
+
+/** POST {orchestrator}/slots/layout — persist an edited layout (calibration). */
+export async function saveSlotLayout(layout: SlotLayout): Promise<{ status: string; slots: number }> {
+  const base = serviceUrl("orchestrator");
+  const res = await fetch(`${base}/slots/layout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(layout),
+  });
+  if (!res.ok) throw new Error(`save layout failed: HTTP ${res.status}`);
+  return res.json();
+}
+
+/** POST {orchestrator}/slots/occupancy — score every slot for one RGB frame. */
+export async function runSlotOccupancy(
+  imageB64: string,
+  maskSource?: string,
+): Promise<SlotOccupancyResponse> {
+  const base = serviceUrl("orchestrator");
+  const body: Record<string, unknown> = { image_b64: imageB64 };
+  if (maskSource) body.mask_source = maskSource;
+  const res = await fetch(`${base}/slots/occupancy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`occupancy failed: HTTP ${res.status}`);
   return res.json();
 }
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { RunStatus } from "../hooks/useRunStream";
-import type { PosePipeline, RobotTarget } from "../lib/types";
+import type { LocalizationMode, PosePipeline, RobotTarget } from "../lib/types";
 
 const TARGETS: { value: RobotTarget; label: string; title: string }[] = [
   { value: "real", label: "Real", title: "Drive the real Jetson arm only" },
@@ -14,6 +14,11 @@ const POSE_PIPELINES: { value: PosePipeline; label: string; title: string }[] = 
   { value: "2d", label: "2D", title: "GigaPose CAD-free planar pose from the mask — no templates; top-down/planar picking" },
 ];
 
+const LOCALIZATIONS: { value: LocalizationMode; label: string; title: string }[] = [
+  { value: "pose", label: "Pose", title: "6DoF/2D pose stage + back-projection (default)" },
+  { value: "slots", label: "Slots", title: "Depth-free: SAM3 occupancy of a calibrated tray → the filled slot's measured base pose. No 3D. Calibrate on the Slots page." },
+];
+
 export default function RunControls({
   status,
   dryRun,
@@ -24,6 +29,8 @@ export default function RunControls({
   onRobotTarget,
   posePipeline,
   onPosePipeline,
+  localization,
+  onLocalization,
   simAvailable,
   activeTarget,
   onStart,
@@ -40,6 +47,8 @@ export default function RunControls({
   onRobotTarget: (v: RobotTarget) => void;
   posePipeline: PosePipeline;
   onPosePipeline: (v: PosePipeline) => void;
+  localization: LocalizationMode;
+  onLocalization: (v: LocalizationMode) => void;
   simAvailable: boolean;
   activeTarget: string | null;
   onStart: () => void;
@@ -118,7 +127,36 @@ export default function RunControls({
 
       <div
         className="flex items-center gap-1 rounded-lg border border-zinc-700 p-0.5"
-        title={dryRun ? "Dry run uses mocks — pose stage is mocked" : "Pose stage pipeline"}
+        title={dryRun ? "Dry run uses mocks — localization is mocked" : "How the loop localizes a grasp"}
+      >
+        <span className="px-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Loc</span>
+        {LOCALIZATIONS.map((l) => {
+          const active = localization === l.value;
+          return (
+            <button
+              key={l.value}
+              onClick={() => onLocalization(l.value)}
+              disabled={targetDisabled}
+              title={l.title}
+              className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
+                active ? "bg-sky-500 text-sky-950" : "text-zinc-400 hover:bg-zinc-800"
+              } disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              {l.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        className="flex items-center gap-1 rounded-lg border border-zinc-700 p-0.5"
+        title={
+          localization === "slots"
+            ? "Slot localization is depth-free — the pose stage is bypassed"
+            : dryRun
+              ? "Dry run uses mocks — pose stage is mocked"
+              : "Pose stage pipeline"
+        }
       >
         <span className="px-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Pose</span>
         {POSE_PIPELINES.map((p) => {
@@ -127,7 +165,7 @@ export default function RunControls({
             <button
               key={p.value}
               onClick={() => onPosePipeline(p.value)}
-              disabled={targetDisabled}
+              disabled={targetDisabled || localization === "slots"}
               title={p.title}
               className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
                 active ? "bg-sky-500 text-sky-950" : "text-zinc-400 hover:bg-zinc-800"

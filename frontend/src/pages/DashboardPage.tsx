@@ -58,6 +58,8 @@ export default function DashboardPage() {
           onRobotTarget={run.setRobotTarget}
           posePipeline={run.posePipeline}
           onPosePipeline={run.setPosePipeline}
+          localization={run.localization}
+          onLocalization={run.setLocalization}
           simAvailable={simAvailable}
           activeTarget={run.activeTarget}
           onStart={() =>
@@ -66,7 +68,8 @@ export default function DashboardPage() {
               run.delayMs / 1000,
               run.dryRun ? undefined : run.robotTarget,
               run.product || undefined,
-              run.dryRun ? undefined : run.posePipeline,
+              run.dryRun || run.localization === "slots" ? undefined : run.posePipeline,
+              run.dryRun ? undefined : run.localization,
             )
           }
           onStop={run.stop}

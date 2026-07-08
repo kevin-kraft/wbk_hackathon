@@ -65,6 +65,32 @@ class HttpPerception:
         masks = r.json().get("masks", [])
         return masks[0]["mask_b64_png"] if masks else None
 
+    def segment_all(self, frame: SceneFrame, text: str) -> list[str]:
+        """All SAM3 masks (base64 PNG) matching a text prompt — every instance,
+        not just the first. Used by slot occupancy to test which slots a class
+        covers."""
+        r = self._http.post(
+            f"{self.c.perception_sam3_url}/infer",
+            json={"image_b64": frame.rgb_b64, "text": text},
+        )
+        r.raise_for_status()
+        return [m["mask_b64_png"] for m in r.json().get("masks", []) if m.get("mask_b64_png")]
+
+    def segment_labeled(self, frame: SceneFrame) -> list[tuple[str, str]]:
+        """One YOLO-Seg pass -> (label, mask_b64) per detected instance. The
+        closed-vocab alternative to per-class SAM3 prompts for slot occupancy."""
+        r = self._http.post(
+            f"{self.c.perception_yoloseg_url}/infer",
+            json={"image_b64": frame.rgb_b64, "conf": 0.1},
+        )
+        r.raise_for_status()
+        out: list[tuple[str, str]] = []
+        for inst in r.json().get("instances", []):
+            mask = inst.get("mask_b64_png")
+            if mask:
+                out.append((inst.get("label") or str(inst.get("class_id")), mask))
+        return out
+
     def is_present(self, frame: SceneFrame, part: PartDetection) -> bool:
         # Present if SAM3 still finds the class by text prompt.
         r = self._http.post(

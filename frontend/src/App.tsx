@@ -2,6 +2,7 @@ import { HashRouter, Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout";
 import DashboardPage from "./pages/DashboardPage";
 import PerceptionPage from "./pages/PerceptionPage";
+import SlotsPage from "./pages/SlotsPage";
 import InspectionPage from "./pages/InspectionPage";
 import SettingsPage from "./pages/SettingsPage";
 
@@ -15,6 +16,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/perception" element={<PerceptionPage />} />
+          <Route path="/slots" element={<SlotsPage />} />
           <Route path="/inspection" element={<InspectionPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

@@ -19,10 +19,14 @@ def _k_from_env() -> list[float] | None:
 
 @dataclass
 class Settings:
-    # "zivid" (real camera), "mock" (synthetic frame), or "file" (read from disk).
-    # Defaults to zivid — on the Jetson where the camera lives. Override to "mock"
-    # for dev/CI on a machine without the SDK or camera.
+    # "zivid" (real RGB-D camera), "rgbcam" (a plain 2D camera via OpenCV — the
+    # new depth-less setup for slot localization), "mock" (synthetic frame), or
+    # "file" (read from disk). Defaults to zivid. Override to "rgbcam" for the new
+    # arm+camera, or "mock" for dev/CI without any camera.
     backend: str = field(default_factory=lambda: os.getenv("SCENE_CAMERA_BACKEND", "zivid"))
+
+    # rgbcam backend: OpenCV VideoCapture index (or a device path / stream URL).
+    cam_index: str = field(default_factory=lambda: os.getenv("SCENE_CAMERA_INDEX", "0"))
 
     # Optional Zivid Studio settings preset (YAML). Without it a default
     # single-acquisition capture is used — fine to smoke-test, tune per scene later.
