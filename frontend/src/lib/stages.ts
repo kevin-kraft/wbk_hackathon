@@ -46,6 +46,11 @@ export function stateToStage(state: LoopState | string): string | null {
 
 // Per-state pill styling for the event log (Tailwind classes).
 export const STATE_STYLE: Record<string, string> = {
+  // Plan-driven runs: the generated plan + per-step narration.
+  PLAN_GENERATED: "bg-fuchsia-500/15 text-fuchsia-300 ring-fuchsia-500/30",
+  STEP: "bg-fuchsia-500/15 text-fuchsia-300 ring-fuchsia-500/30",
+  // LLM-proposed actions rejected by the vocabulary validator (scripted fallback ran).
+  GUARDRAIL: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
   LOCATE: "bg-sky-500/15 text-sky-300 ring-sky-500/30",
   POSE: "bg-violet-500/15 text-violet-300 ring-violet-500/30",
   GRIP: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",

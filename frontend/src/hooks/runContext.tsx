@@ -18,6 +18,9 @@ interface RunContextValue extends RunStreamState {
   setSourceMode: (v: SourceMode) => void;
   prompt: string;
   setPrompt: (v: string) => void;
+  // Plan-driven runs: selected ERP product ("" = manual, perception-driven mode).
+  product: string;
+  setProduct: (v: string) => void;
 }
 
 const RunContext = createContext<RunContextValue | null>(null);
@@ -31,6 +34,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // Default the scene source to the sim when the robot target is sim, else real.
   const [sourceMode, setSourceMode] = useState<SourceMode>(cfg.run.robotTarget === "sim" ? "sim" : "real");
   const [prompt, setPrompt] = useState("");
+  const [product, setProduct] = useState("");
 
   return (
     <RunContext.Provider
@@ -46,6 +50,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
         setSourceMode,
         prompt,
         setPrompt,
+        product,
+        setProduct,
       }}
     >
       {children}

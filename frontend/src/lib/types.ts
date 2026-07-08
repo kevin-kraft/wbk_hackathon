@@ -61,13 +61,41 @@ export type LoopState =
   | "BLOCKED"
   | "SIM_WARN"
   | "DONE"
-  | "SUMMARY";
+  | "SUMMARY"
+  // Plan-driven runs (ERP + LLM head — see orchestrator PLAN_GENERATED/STEP events)
+  | "PLAN_GENERATED"
+  | "STEP"
+  // LLM-proposed actions rejected by the vocabulary validator; scripted fallback ran.
+  | "GUARDRAIL";
 
 export interface LoopEvent {
   step: number;
   state: LoopState | string;
   message: string;
   data: Record<string, unknown>;
+}
+
+// --- ERP products + generated plans (orchestrator /products and /plan) ---
+
+export interface ErpProduct {
+  id: string;
+  name: string;
+  description?: string | null;
+  parts: string[];
+}
+
+export interface PlanStepPreview {
+  index: number;
+  part: string;
+  action: string;
+  notes?: string | null;
+}
+
+export interface PlanPreview {
+  product: string;
+  source: string; // static | llm | mock | static-fallback
+  rationale?: string | null;
+  steps: PlanStepPreview[];
 }
 
 export interface RunStats {

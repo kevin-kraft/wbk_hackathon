@@ -4,6 +4,7 @@
 - [System: Orchestrator](./orchestrator.md) — the state machine that ties every stage below together, the Protocol/client seam, loop states, the `/events/run` SSE endpoint
 - [System: Dashboard](./dashboard.md) — the operator console / live demo UI that streams from the orchestrator
 - [System: Robot Control](./robot_control.md) — the movement stage: Group 2's Jetson bridge to the LARA5 robot
+- [System: Training](./training.md) — the custom YOLOv26 detection/segmentation training pipeline that feeds Stage 1 Perception's `yolo` service
 - [Integration Points & Wire Contracts](./integration_points.md) — the base64-in-JSON contracts, model-adapter pattern, HF cache mount, the SSE contract
 - [ADR: perception shared container vs. pose split containers](../Decisions/0001-perception-shared-container-pose-split-containers.md)
 - [ADR: perception model stack](../Decisions/0002-perception-model-stack.md)
@@ -13,10 +14,15 @@
 - [ADR: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why the UI isn't fused into the orchestrator
 - [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — the optional `WBK_API_TOKEN` gate on every work endpoint
 - [ADR: robot_control integration](../Decisions/0010-robot-control-integration.md) — merging in Group 2's Jetson bridge as the movement stage, and the still-open orchestrator adapter gap
+- [ADR: LLM action selector, constrained vocabulary](../Decisions/0011-llm-action-selector-constrained-vocabulary.md) — the guardrail on the plan-driven loop's optional LLM command synthesis
 - [SOP: running the services](../SOP/running_services.md)
 - [SOP: running the tests](../SOP/running_tests.md)
 - [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
-- [SOP: deploying perception to a remote GPU server](../SOP/deploy_perception_gpu_server.md) — in progress, not yet running
+- [SOP: deploying perception to a remote GPU server](../SOP/deploy_perception_gpu_server.md) — deployed and running (2026-07-08); tunneled to a local orchestrator via `docker-compose.remote-gpu.yml`
+- [ADR 0012: mask-derived detection labels](../Decisions/0012-mask-derived-detection-labels.md) — why YOLO detection training uses `--task detmask` instead of the `bbox_2d` annotator
+- [ADR 0013: AMP disabled on the Blackwell training stack](../Decisions/0013-amp-disabled-blackwell-training.md)
+- [ADR 0014: robot target selection (real \| sim \| both)](../Decisions/0014-robot-target-real-sim-both.md) — driving the Isaac Sim digital twin instead of/alongside the real arm, and why sim is a mirror, not a peer
+- `contracts/simulation_api.md` / `contracts/sim_scene_capture.md` — the Isaac Sim command-bus surface, and the (draft, unimplemented) sim scene-capture contract
 
 ## What this is
 
@@ -38,17 +44,47 @@ implementation-level detail (ports, containers, code layout) on top of those.
 ## Pipeline
 
 ```
+                       PLANNING HEAD (optional — plan mode only, see below)
+                       ERP dataset ─► [LLM re-order+describe] ─► Plan (ordered steps)
+                                             │
+                                             ▼
               ┌────────────────  ORCHESTRATOR  (state machine, :8000) ────────────────┐
               ▼                                                                       │
  scene cam ─► PERCEPTION ─► 6DoF POSE ─► GRASP PLANNING ─► MOVEMENT ─► [grip sensor] ─► DAMAGE ─► bin
-              (yolo/sam3/    (foundation   (naive/future)   (robot_control   (0/1 rectify,    (OpenRouter
-               locate)        pose/giga)                     :9000, built,    external)         VLM)   └─► loop back to PERCEPTION
-                                                              adapter TODO)
+              (yolo/sam3/    (foundation   (naive/future,   (robot_control   (0/1 rectify,    (OpenRouter
+               locate)        pose/giga)   optional LLM      :9000, built,    external)         VLM)   └─► loop back to PERCEPTION
+                                            action selector,  adapter TODO)                              (fixed mode) or next
+                                            constrained            │                                     plan step (plan mode)
+                                            vocabulary)             ▼ ROBOT_TARGET=sim|both (mirrored, best-effort)
+                                                          Isaac Sim digital twin (:8100, external —
+                                                          IsaacSimMovement adapter, see ADR 0014)
 
                                      ▲ GET /events/run (SSE, read-only)
                                      │
                              DASHBOARD (frontend/, :5173, separate static app)
 ```
+
+The **planning head** (`orchestrator/clients/erp.py` + `clients/llm_planner.py`,
+added 2026-07-08) is an alternative front end to the loop, not a new stage in
+the per-part pipeline: `run(product=...)` generates an ordered `Plan` once
+up front (from a mock-ERP JSON dataset, optionally LLM re-ordered), then
+drives the same PERCEPTION→POSE→GRASP→MOVEMENT→DAMAGE sequence per plan step
+instead of per `perception.next_part()` call. See
+[System: Orchestrator](./orchestrator.md) "Plan mode" and
+[ADR 0011](../Decisions/0011-llm-action-selector-constrained-vocabulary.md)
+(the constrained-vocabulary guardrail on the optional LLM action selector
+inside GRASP PLANNING/MOVEMENT).
+
+**MOVEMENT can also drive an Isaac Sim digital twin** instead of, or
+mirrored alongside, the real Jetson arm — `ROBOT_TARGET=real|sim|both`
+(default `real`, overridable per-run via `?target=`), resolved in
+`orchestrator/factory.py:_build_robot()`. `both` mode fans every command out
+to the real arm (authoritative) and the sim (best-effort mirror via
+`TeeMovement` — a sim fault never fails a real run). See
+[System: Orchestrator](./orchestrator.md) "Robot target selection" and
+[ADR 0014](../Decisions/0014-robot-target-real-sim-both.md). This is
+independent of the planning head above — either loop mode (fixed or
+plan-driven) can run against `real`, `sim`, or `both`.
 
 The **orchestrator** (`orchestrator/`, added `3abc923`) is the state machine
 that drives this whole loop, calling each stage through pluggable clients —
@@ -63,12 +99,14 @@ robot through any path the loop itself doesn't expose — see
 
 | Stage | Dir | Services (port) | Containers | Hardware | Status |
 |---|---|---|---|---|---|
-| Orchestrator | `orchestrator/` | orchestrator `:8000` | 1 | CPU | Built (mock-driven; also drives real services; SSE live-run endpoint) |
+| Planning head (ERP + LLM) | `orchestrator/clients/erp.py`, `clients/llm_planner.py` | — (in-process; consumed via orchestrator `:8000`) | — | CPU (OpenRouter API call if LLM mode) | Built — mock-ERP JSON, optional LLM re-ordering, static fallback |
+| Orchestrator | `orchestrator/` | orchestrator `:8000` | 1 | CPU | Built (mock-driven; also drives real services; SSE live-run endpoint; fixed + plan-driven modes) |
 | Perception | `perception/` | yolo `:8001`, sam3 `:8002`, locateanything `:8003` | 1 (supervisord) | GPU | Built |
 | 6DoF pose | `pose/` | foundationpose `:8004`, gigapose `:8005` | 2 (siblings) | GPU | Built |
 | Grasp planning | `orchestrator/clients/naive_grasp.py` | — (in-process) | — | CPU | Naive placeholder — real module not built |
 | Movement | `robot_control/` | robot_control `:9000` (Jetson) | 1 | CPU (drives LARA5 arm) | Service built + deployed (Group 2) — [System doc](./robot_control.md), [ADR 0010](../Decisions/0010-robot-control-integration.md) — orchestrator adapter to its real API **not yet written** |
-| Grip detection | — | pressure sensor (external) | — | — | Teammate-owned, in progress — [proposed contract](../../contracts/grip_api.md) |
+| Simulator (digital twin) | `orchestrator/clients/sim_movement.py`, `clients/tee_movement.py` (adapter, in-repo) + external Isaac Sim backend | simulator `:8100` (external, KIT `ki_robotik_cv_seminar`, normally on-prem `kip-ws`) | 0 (adapter is in-process) | GPU (external, Isaac Sim) | Adapter built — arm motion + gripper only (`ROBOT_TARGET=sim\|both`, [ADR 0014](../Decisions/0014-robot-target-real-sim-both.md)); scene capture from the sim is a separate, unimplemented draft (`contracts/sim_scene_capture.md`); named-pose teach table is placeholder data |
+| Grip detection | — | pressure sensor (external) | — | — | Teammate-owned, in progress — [proposed contract](../../contracts/grip_api.md); sim mode substitutes `SimGrip` (assume-grasp) |
 | Damage inspection | `damage/` | damage `:8006` | 1 | CPU | Built |
 | Dashboard (UI) | `frontend/` | dashboard `:5173` (nginx) | 1 | — | Built — live SSE, works today against mocks |
 
@@ -105,7 +143,18 @@ Blackwell GPUs (sm_120, e.g. RTX PRO 6000) need it overridden to a CUDA
 12.8/torch 2.8 base at build time. `requirements.txt` deliberately excludes
 torch so the base image's own build is used untouched. See
 [SOP: deploying perception to a remote GPU server](../SOP/deploy_perception_gpu_server.md)
-(in progress, not yet running) for the full recipe.
+for the full recipe — this is now a **deployed, running** setup (two
+containers, `wbk-perception` + a standalone `wbk-sam3`, reached via an SSH
+tunnel), not just a local `docker compose` build.
+
+The `yolo` service now serves a **custom-trained** detector
+(`parts_detmask.pt`, 18 native part classes, mAP50 0.99 / recall 0.99)
+instead of the stock `yolo11n.pt` default — trained on synthetic Isaac-Sim
+data by the pipeline in `training/`. See [System: Training](./training.md)
+for the training pipeline itself, and
+[ADR 0012](../Decisions/0012-mask-derived-detection-labels.md) /
+[ADR 0013](../Decisions/0013-amp-disabled-blackwell-training.md) for the two
+training decisions behind that result.
 
 | Service | Port | Job | Backend | Module |
 |---|---|---|---|---|
@@ -208,45 +257,88 @@ As of the orchestrator addition (`3abc923`, 2026-07-07):
   proposed contract (`contracts/grip_api.md`) for it, but the endpoint
   itself is not yet online — do not assume it is reachable.
 - **YOLO detection tuning** for the specific disassembly-part vocabulary is
-  still moving; the orchestrator runs against mocks for `next_part` in the
-  interim (see [System: Orchestrator](./orchestrator.md)).
+  now trained and deployed (`parts_detmask.pt`, 18 classes, mAP50 0.99/recall
+  0.99 — see [System: Training](./training.md)) to the GPU-server
+  `wbk-perception` container. The orchestrator's *mock* `next_part` path
+  (mocks-first design, [ADR 0005](../Decisions/0005-mock-first-interface-seam-integration.md))
+  is unaffected by this and still exists as the default for dry-runs/tests —
+  this bullet is about the underlying model quality, not the orchestrator's
+  client wiring.
 - **Two VLM roles from the task spec** — VLM next-part selection (an
   alternative `PerceptionClient.next_part` backend) and VLM grip
   verification (a second opinion alongside the binary grip sensor). Both
   have a clean seam in the Protocol design but neither is implemented — see
-  [System: Orchestrator](./orchestrator.md) "Two future VLM roles".
+  [System: Orchestrator](./orchestrator.md) "Two future VLM roles". (Not to
+  be confused with the planning head and constrained-vocabulary action
+  selector below, which **are** implemented — those are a different vision,
+  captured and shipped 2026-07-08.)
+- **Real ERP integration** — the planning head (see "Plan mode" above and
+  [System: Orchestrator](./orchestrator.md)) is built against a mock JSON
+  dataset (`orchestrator/data/erp_products.json`) behind a `PlanProvider`
+  Protocol; a real ERP system was explicitly out of scope for the hackathon,
+  and would implement the same Protocol with no loop changes.
+- **Sim scene capture** — feeding perception/pose from a rendered Isaac Sim
+  frame instead of the real Zivid. The sim backend's `GET_ZIVID_DATA`
+  command is unimplemented and there is no HTTP route that returns an image;
+  `contracts/sim_scene_capture.md` is a draft handoff to Group 2 (the
+  rendering plumbing they'd reuse already exists elsewhere in their repo,
+  just not wired into `simulation_backend`). Until it lands, `sim`/`both`
+  robot-target runs still need the real Zivid (or `StaticSceneCamera`) for
+  perception input — only the arm/gripper backend switches, see
+  [ADR 0014](../Decisions/0014-robot-target-real-sim-both.md). The frontend
+  dashboard's `SourceToggle`/`SceneView` already call the draft contract and
+  degrade gracefully ("not implemented yet") until it exists — see
+  [System: Dashboard](./dashboard.md).
+- **Sim named-pose teach table** — `home`/`clearance`/`ok_bin`/`reject_bin`/
+  `inspect_*` have no sim equivalent; `orchestrator/clients/sim_movement.py`'s
+  built-in table and `deploy/sim_named_poses.example.json` are rough
+  placeholders, not measured teach points (see
+  [System: Orchestrator](./orchestrator.md) "Robot target selection").
 
 ## Test suite
 
-105 pytest tests (`tests/`), up from 86 before the shared-token auth layer:
-86 covering pure logic in perception/pose/damage (schemas, image/tensor
-codecs, the LocateAnything token parser, prompt building, the damage bin
-policy, FastAPI route wiring with model adapters mocked) plus the full
-disassembly loop end-to-end against mocks (rectify-retry, reject-bin
-routing, blacklisting an ungraspable part, bounded termination), plus 19 new
-`test_auth.py` tests (7 in `tests/orchestrator/`, 4 each in
-`tests/{damage,perception,pose}/`) covering the `require_token` dependency —
-disabled when `WBK_API_TOKEN` unset, 401 on missing/wrong token, accepted
-via header or `?token=` query param, `/health` always open — see
-[ADR 0009](../Decisions/0009-shared-token-auth.md). No GPU, no model
-weights, no `OPENROUTER_API_KEY`, no network, no hardware. See
-[SOP: running the tests](../SOP/running_tests.md) for the conftest.py
-per-stage import-root subtlety and what's intentionally NOT covered
-(`*.load()`/`*.infer()`/`*.estimate()` on all five real model adapters). This
-count is Python-only. `frontend/` has its own **Vitest** unit suite — 26
-tests across 4 files (`npm test` → `vitest run`, jsdom env,
+204 pytest tests (`tests/`), up from 105 before the ERP/LLM planning head
+(2026-07-08): the prior 105 (86 covering pure logic in perception/pose/damage
+— schemas, image/tensor codecs, the LocateAnything token parser, prompt
+building, the damage bin policy, FastAPI route wiring with model adapters
+mocked — plus the full disassembly loop end-to-end against mocks
+(rectify-retry, reject-bin routing, blacklisting an ungraspable part,
+bounded termination), plus 19 `test_auth.py` tests covering `require_token`
+— see [ADR 0009](../Decisions/0009-shared-token-auth.md)) are unchanged and
+still green, plus **24 new tests** in
+[`tests/orchestrator/test_plan.py`](../../tests/orchestrator/test_plan.py)
+covering the planning head end to end: the constrained action vocabulary's
+full rejection surface, `StaticPlanProvider`/`LlmPlanProvider` (permutation
+guardrail, static fallback on any LLM error), plan-driven loop behavior
+(SKIP/BLOCKED/STEP/PLAN_GENERATED events), and the `/products`/`/plan`/
+`product`-param endpoints — see [System: Orchestrator](./orchestrator.md)
+"Plan mode" and [ADR 0011](../Decisions/0011-llm-action-selector-constrained-vocabulary.md).
+The 204 total also already includes 22 further tests
+(`tests/orchestrator/test_robot_target.py`, `test_sim_movement.py`) covering
+the real/sim/both robot-target selection and the `IsaacSimMovement` command-
+bus adapter — see [System: Orchestrator](./orchestrator.md) "Tests". No GPU,
+no model weights, no `OPENROUTER_API_KEY` (the LLM clients are
+tested via a monkeypatched `_chat()` seam, not a real network call), no
+hardware. See [SOP: running the tests](../SOP/running_tests.md) for the
+conftest.py per-stage import-root subtlety and what's intentionally NOT
+covered (`*.load()`/`*.infer()`/`*.estimate()` on all five real model
+adapters). This count is Python-only. `frontend/` has its own **Vitest**
+unit suite — 30 tests across 4 files (`npm test` → `vitest run`, jsdom env,
 `frontend/vitest.config.ts`), covering `config/runtime.ts`'s endpoint
 precedence resolution, `lib/stages.ts`'s state→stage mapping, the
 event-reducer logic in `lib/derive.ts` (`tallyBins`, `deriveInspections`,
-`deriveGrip`, `currentPart`), and the `apiToken` auth-header/query-param
-wiring in `lib/api.ts` — see [System: Dashboard](./dashboard.md) for
-detail. `npm run build` (`tsc -b && vite build`) remains the type-check +
-production-bundle gate on top of that.
+`deriveGrip`, `currentPart`, and — 4 new cases as of 2026-07-08 —
+`derivePlan`, which turns `PLAN_GENERATED`/`STEP`/`SORT`/`SKIP`/`BLOCKED`
+events into the `PlanProgress` checklist), and the `apiToken`
+auth-header/query-param wiring in `lib/api.ts` — see
+[System: Dashboard](./dashboard.md) for detail. `npm run build`
+(`tsc -b && vite build`) remains the type-check + production-bundle gate on
+top of that.
 
 CI: `.github/workflows/tests.yml` has two jobs. `pytest` runs `uv sync
---frozen && uv run pytest -q` (105 tests). `frontend` runs `npm ci`, then
-`npm test` (the 26-test Vitest suite), then `npm run build` — so unit tests,
+--frozen && uv run pytest -q` (204 tests). `frontend` runs `npm ci`, then
+`npm test` (the 30-test Vitest suite), then `npm run build` — so unit tests,
 type-check, and build all gate every push/PR to `main`. Green as of
 `7cf5211` ("Add GitHub Actions CI to run tests on push/PR to main"),
-extended to cover the frontend suite once Vitest landed, and again for the
-shared-token auth tests.
+extended to cover the frontend suite once Vitest landed, again for the
+shared-token auth tests, and again for the planning head.

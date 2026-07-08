@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { LoopEvent, RunStats } from "./types";
-import { tallyBins, deriveInspections, deriveGrip, currentPart } from "./derive";
+import { tallyBins, deriveInspections, deriveGrip, currentPart, derivePlan } from "./derive";
 
 function ev(step: number, state: string, data: Record<string, unknown> = {}): LoopEvent {
   return { step, state, message: `${state} ${step}`, data };
@@ -87,5 +87,43 @@ describe("currentPart", () => {
 
   it("falls back to a placeholder with no events", () => {
     expect(currentPart([])).toEqual({ part: "—", step: 0 });
+  });
+});
+
+describe("derivePlan", () => {
+  const PLAN_RUN: LoopEvent[] = [
+    ev(0, "PLAN_GENERATED", {
+      product: "gearbox-demo",
+      source: "mock",
+      steps: [
+        { part: "cover", action: "lift the top cover" },
+        { part: "bracket", action: "slide the bracket out" },
+        { part: "gear", action: "pull the gear off" },
+      ],
+    }),
+    ev(1, "STEP", { part: "cover", index: 1, total: 3 }),
+    ev(1, "LOCATE", { part: "cover" }),
+    ev(1, "SORT", { verdict: "ok", bin: "ok_bin" }),
+    ev(2, "STEP", { part: "bracket", index: 2, total: 3 }),
+  ];
+
+  it("returns null for a run without a plan", () => {
+    expect(derivePlan(RUN)).toBeNull();
+  });
+
+  it("marks completed steps done and the current step active", () => {
+    const plan = derivePlan(PLAN_RUN);
+    expect(plan?.source).toBe("mock");
+    expect(plan?.rows.map((r) => r.status)).toEqual(["done", "active", "pending"]);
+  });
+
+  it("marks a blocked step blocked", () => {
+    const blocked = [...PLAN_RUN, ev(2, "SKIP", {}), ev(2, "BLOCKED", {})];
+    expect(derivePlan(blocked)?.rows[1].status).toBe("blocked");
+  });
+
+  it("marks a step whose part was missing from the scene as skipped", () => {
+    const skipped = [...PLAN_RUN, ev(2, "SKIP", { part: "bracket" }), ev(3, "STEP", { part: "gear", index: 3, total: 3 })];
+    expect(derivePlan(skipped)?.rows.map((r) => r.status)).toEqual(["done", "skipped", "active"]);
   });
 });

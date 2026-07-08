@@ -71,6 +71,43 @@ class Inspection:
 
 
 @dataclass
+class PlanStep:
+    """One step of a generated disassembly plan: remove `part` by doing `action`."""
+
+    part: str  # perception class name of the part this step removes
+    action: str  # human-readable instruction, e.g. "lift the top cover straight up"
+    index: int = 0  # 1-based position in the plan
+    notes: str | None = None  # extra ERP context (fasteners, tools, cautions)
+
+
+@dataclass
+class Plan:
+    """An ordered disassembly plan for one product (ERP-derived, LLM- or statically generated)."""
+
+    product: str
+    steps: list[PlanStep] = field(default_factory=list)
+    source: str = "static"  # static | llm | mock | static-fallback
+    rationale: str | None = None
+
+
+@dataclass
+class ArmAction:
+    """One arm command from the constrained action vocabulary (see actions.py).
+
+    This is the ONLY shape in which an LLM may propose robot motion: named poses
+    from a fixed allowlist, or a move to a pipeline-computed pose referenced by
+    name (`pose_ref`) — never a free-form matrix. `validate_actions` enforces it
+    before anything reaches a MovementClient.
+    """
+
+    kind: str  # move_named | move_to_pose | gripper
+    name: str | None = None  # for move_named
+    pose_ref: str | None = None  # for move_to_pose: pre_grasp | grasp
+    closed: bool | None = None  # for gripper
+    width: float | None = None  # for gripper (optional; system default if None)
+
+
+@dataclass
 class LoopEvent:
     """One step of the state machine, for logging / the live demo narration."""
 

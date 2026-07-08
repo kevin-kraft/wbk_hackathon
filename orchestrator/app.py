@@ -58,17 +58,67 @@ def health() -> dict:
 
 
 @app.post("/run", dependencies=[Depends(require_token)])
-def run(dry_run: bool = False, target: str | None = None) -> dict:
+def run(dry_run: bool = False, target: str | None = None, product: str | None = None) -> dict:
     """Run a full loop and return all events + the final stats at once (no streaming).
 
     `target` (real|sim|both) picks which robot the loop drives, overriding
-    ROBOT_TARGET for this run only.
+    ROBOT_TARGET for this run only. `product` switches to a plan-driven run:
+    the PlanProvider generates an ordered disassembly plan for that product and
+    the loop executes it step by step (see GET /products for the choices).
     """
     events: list[dict] = []
     config = _config_for(target)
     orchestrator = build_orchestrator(config=config, dry_run=dry_run, on_event=lambda e: events.append(_event_dict(e)))
-    stats = orchestrator.run()
-    return {"stats": stats, "target": config.robot_target, "events": events}
+    stats = orchestrator.run(product=product)
+    return {"stats": stats, "target": config.robot_target, "product": product, "events": events}
+
+
+@app.get("/products", dependencies=[Depends(require_token)])
+def products() -> dict:
+    """Operator-selectable products from the (mock-)ERP dataset, for the dashboard."""
+    from .clients.erp import load_products
+
+    config = OrchestratorConfig()
+    items = [
+        {
+            "id": pid,
+            "name": entry.get("name", pid),
+            "description": entry.get("description"),
+            "parts": [p["part"] for p in entry.get("parts", [])],
+        }
+        for pid, entry in sorted(load_products(config.erp_products_path).items())
+    ]
+    return {"products": items}
+
+
+@app.get("/plan", dependencies=[Depends(require_token)])
+def plan_preview(product: str, dry_run: bool = False) -> dict:
+    """Generate (but do not execute) the disassembly plan for a product — lets the
+    operator review the LLM/ERP plan before starting a run."""
+    from fastapi import HTTPException
+
+    config = OrchestratorConfig()
+    if dry_run:
+        from .mocks import MockPlanProvider
+
+        provider = MockPlanProvider()
+    else:
+        from .factory import _build_plan_provider
+
+        provider = _build_plan_provider(config)
+    try:
+        plan = provider.get_plan(product)
+    except ValueError as exc:  # unknown product
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {
+        "product": plan.product,
+        "source": plan.source,
+        "rationale": plan.rationale,
+        "steps": [
+            {"index": s.index, "part": s.part, "action": s.action, "notes": s.notes}
+            for s in plan.steps
+        ],
+    }
 
 
 def _sse(data: dict, event: str | None = None) -> str:
@@ -78,14 +128,17 @@ def _sse(data: dict, event: str | None = None) -> str:
 
 
 @app.get("/events/run", dependencies=[Depends(require_token)])
-async def events_run(dry_run: bool = False, delay: float = 0.0, target: str | None = None) -> StreamingResponse:
+async def events_run(
+    dry_run: bool = False, delay: float = 0.0, target: str | None = None, product: str | None = None
+) -> StreamingResponse:
     """Run a loop and stream each stage event as it happens (SSE).
 
     `delay` (seconds) paces emission so the live demo is watchable — mocks
     otherwise run to completion in milliseconds. `target` (real|sim|both) picks
-    which robot the loop drives for this run. The loop runs in a worker thread
-    (it is synchronous/blocking) and pushes events through a thread-safe queue
-    that the async SSE generator drains.
+    which robot the loop drives for this run. `product` switches to a
+    plan-driven run (see POST /run). The loop runs in a worker thread (it is
+    synchronous/blocking) and pushes events through a thread-safe queue that
+    the async SSE generator drains.
     """
     q: queue.Queue = queue.Queue()
     sentinel = object()
@@ -99,7 +152,7 @@ async def events_run(dry_run: bool = False, delay: float = 0.0, target: str | No
     def worker() -> None:
         try:
             orchestrator = build_orchestrator(config=config, dry_run=dry_run, on_event=on_event)
-            stats = orchestrator.run()
+            stats = orchestrator.run(product=product)
             q.put(("summary", stats))
         except Exception as exc:  # surface failures to the UI instead of a silent hang
             q.put(("error", {"error": str(exc)}))
@@ -110,7 +163,8 @@ async def events_run(dry_run: bool = False, delay: float = 0.0, target: str | No
 
     async def stream():
         loop = asyncio.get_event_loop()
-        yield _sse({"status": "started", "dry_run": dry_run, "target": config.robot_target}, event="start")
+        yield _sse({"status": "started", "dry_run": dry_run, "target": config.robot_target,
+                    "product": product}, event="start")
         while True:
             item = await loop.run_in_executor(None, q.get)
             if item is sentinel:

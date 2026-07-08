@@ -83,6 +83,27 @@ class OrchestratorConfig:
     # Overridable per-run via the /run?target= query param (no restart needed).
     robot_target: str = field(default_factory=lambda: os.getenv("ROBOT_TARGET", "real").strip().lower())
 
+    # --- planning head (ERP + LLM, see clients/erp.py + clients/llm_planner.py) ---
+    # Per-product mock-ERP dataset; defaults to the file packaged with the image.
+    erp_products_path: str = field(default_factory=lambda: os.getenv(
+        "ERP_PRODUCTS_PATH",
+        os.path.join(os.path.dirname(__file__), "data", "erp_products.json"),
+    ))
+    # How plans are generated for plan-driven runs:
+    #   "auto"   — LLM when OPENROUTER_API_KEY is set, else the static ERP order (default)
+    #   "llm"    — LLM required (error without a key)
+    #   "static" — always the ERP order, never an LLM
+    planner_mode: str = field(default_factory=lambda: os.getenv("PLANNER_MODE", "auto").strip().lower())
+    # Whether the approach+grasp motion is LLM-proposed ("llm", constrained to the
+    # actions.py vocabulary + validated, scripted fallback) or always scripted
+    # ("scripted", default — identical to the original loop behaviour).
+    action_synthesis: str = field(default_factory=lambda: os.getenv("ACTION_SYNTHESIS", "scripted").strip().lower())
+    # Same OpenRouter env-var family the damage stage already uses (reuse, not a
+    # second provider). PLANNER_MODEL covers both plan generation + action synthesis.
+    openrouter_api_key: str = field(default_factory=lambda: os.getenv("OPENROUTER_API_KEY", ""))
+    planner_model: str = field(default_factory=lambda: os.getenv("PLANNER_MODEL", "anthropic/claude-sonnet-5"))
+    openrouter_base_url: str = field(default_factory=lambda: os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"))
+
     # --- behaviour ---
     next_part_query: str = field(default_factory=lambda: os.getenv("NEXT_PART_QUERY", "the next part to remove to disassemble this object"))
     max_grasp_attempts: int = field(default_factory=lambda: int(os.getenv("MAX_GRASP_ATTEMPTS", "3")))

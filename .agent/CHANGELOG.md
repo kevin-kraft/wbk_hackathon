@@ -2,6 +2,182 @@
 
 Newest first.
 
+- 2026-07-08 — New YOLOv26 training pipeline (`training/`) documented, and the
+  GPU-server perception deployment (previously "in progress, not yet running"
+  in this doc set) confirmed **deployed and running**. `training/` converts
+  Isaac-Sim Replicator (SDG) synthetic renders into Ultralytics YOLO datasets
+  (`isaac_to_yolo.py`, three task modes — `det`/`detmask`/`seg`, class =
+  instance∩semantic majority vote, cv2-validated, deterministic split,
+  images symlinked) and trains `yolo26m`/`yolo26m-seg` on the shared GPU
+  server (`train.py`: crash-resumable via `--resume`, rolling last-5
+  checkpoints via an `on_model_save` prune callback, `--amp false` required,
+  `--extra k=v` passthrough; `train_supervised.sh` auto-restart supervisor;
+  `run_probes.sh` timing-probe → epoch budget calculator; `clean_dataset.py`
+  parallel cv2 repair tool; `env.sh` redirects all caches off the ~97%-full
+  root disk onto the network drive; `setup_server.sh` provisions the venv
+  reusing the server's system Blackwell torch). Trained a 18-class part
+  detector+segmenter: `parts_detmask_v1` (mAP50 0.99/recall 0.99) and
+  `parts_seg_v1` (0.984 box/0.966 mask); an earlier `parts_det_v1` trained on
+  the sparse `bbox_2d` annotator (mAP50 0.64/recall 0.56) was retired.
+  `deploy_yolo_weights.sh` deployed `parts_detmask_v1/weights/best.pt` to the
+  GPU server's `wbk-perception` container (`YOLO_WEIGHTS` mount, container
+  recreated with the same image/ports/GPU device, health-checked). Discovered
+  along the way: `wbk-perception`'s bundled `sam3` process fails to load on
+  this server (not root-caused) — SAM3 is served instead by a second,
+  standalone `wbk-sam3` container on the GPU-server deployment only (local
+  single-host `docker-compose.yml` is unaffected). The perception stage is
+  now reachable from a local orchestrator via `ssh -N gpu-server` (tunnels
+  `18001-18005`→`6767-6769`/`8004`/`8005`, `6006`→`6772` for TensorBoard) plus
+  `docker compose -f docker-compose.yml -f docker-compose.remote-gpu.yml up
+  -d orchestrator dashboard damage`. Added `System/training.md` (architecture
+  of the whole training pipeline — converter task modes, trainer flags,
+  server env quirks, deployment script, current results table). Added
+  `Decisions/0012-mask-derived-detection-labels.md` (ADR: `--task detmask`
+  over `--task det` — the `bbox_2d` annotator under-tags prims, ~2.8x fewer
+  boxes than the mask-derived count, and the recall gap tracked it exactly)
+  and `Decisions/0013-amp-disabled-blackwell-training.md` (ADR: AMP off is a
+  documented convention, not a code default, on the RTX PRO 6000 Blackwell +
+  torch 2.12 training stack — validation crashes with AMP on). Extended
+  `Decisions/0001-perception-shared-container-pose-split-containers.md` with
+  an "Update" note on the `wbk-sam3` workaround (deployment reality, not a
+  reversal of the one-shared-container decision). Rewrote
+  `SOP/deploy_perception_gpu_server.md` end to end: status flipped from "in
+  progress" to "deployed and running", added the two-container
+  (`wbk-perception`/`wbk-sam3`) topology table, the actual tunnel port map,
+  the `docker-compose.remote-gpu.yml` local-side bring-up command, and the
+  weight-deployment procedure (cross-linked to `System/training.md`).
+  Extended `System/architecture.md`: Related Docs gained `System/training.md`
+  and both new ADRs; Stage 1 Perception section now states the `yolo`
+  service serves the custom-trained `parts_detmask.pt` (not the stock
+  default) and that the GPU-server deployment is live, not pending; the
+  "Not yet built" YOLO-tuning bullet rewritten to "trained and deployed" (the
+  orchestrator's separate mock-`next_part` path for dry-runs/tests is
+  unaffected and called out explicitly so the two aren't conflated). Updated
+  `README.md`'s System, Decisions, and SOP indices for all of the above. Not
+  covered by this update (pre-existing, unrelated in-flight work already
+  present in the working tree at capture time — see the entry immediately
+  below): the ERP/LLM planning head and the `ROBOT_TARGET` real/sim/both
+  Isaac-Sim integration.
+- 2026-07-08 — The ERP-driven, LLM-orchestrated disassembly vision
+  (previously `Tasks/active/llm_orchestrated_disassembly_plan.md`, "vision
+  captured, not yet scoped") is now **implemented** (working tree at capture
+  time, not yet committed): 204 pytest tests green (24 new in
+  `tests/orchestrator/test_plan.py`), 30 frontend Vitest tests green (4 new
+  in `derive.test.ts`), `npm run build` clean. Summary: `orchestrator/models.py`
+  gained `Plan`/`PlanStep`/`ArmAction`; `orchestrator/clients/base.py` gained
+  `PlanProvider`/`ActionSynthesizer` Protocols and
+  `PerceptionClient.locate()`; `orchestrator/loop.py`'s `run(product=None)`
+  dispatches to `_run_fixed()` (unchanged original behavior) or
+  `_run_planned(product)` (new — plan-driven, perception shifts from
+  sequencer to grounder/verifier, a step whose part isn't in the scene SKIPs,
+  a step that can't be grasped BLOCKS the run); new `PLAN_GENERATED`/`STEP`/
+  `GUARDRAIL` `LoopEvent` states. Planning head:
+  `orchestrator/data/erp_products.json` (mock ERP, ships in the image),
+  `StaticPlanProvider` (`clients/erp.py`, stdlib-only ERP order) and
+  `LlmPlanProvider` (`clients/llm_planner.py`, OpenRouter re-ordering,
+  permutation-guardrailed, falls back to static on any error);
+  `PLANNER_MODE=auto|llm|static`. Action synthesis (the safety-critical
+  piece): `orchestrator/actions.py`'s constrained vocabulary (`move_to_pose`
+  by `pose_ref` only — never coordinates; `move_named` restricted to
+  `home`/`clearance` in grasp context; `gripper` open/close) with
+  `validate_actions()` rejecting any violation before a `MovementClient` call
+  and `scripted_grasp_sequence()` (identical to the pre-existing loop motion)
+  as the fallback; `ACTION_SYNTHESIS=scripted|llm`, opt-in, `scripted` is the
+  default (no LLM in the motion path at all).
+  `orchestrator/clients/openrouter.py` is a new shared LLM-provider wrapper
+  (mirrors `damage/client.py`'s pattern deliberately — provider reuse, not a
+  second integration) used by both the planner and the action synthesizer.
+  New endpoints `GET /products` and `GET /plan`; `product` param added to
+  `POST /run` and `GET /events/run`. Frontend: `ProductSelector` (product
+  dropdown from `GET /products`) and `PlanProgress` (live plan checklist
+  derived from `derivePlan()` in `lib/derive.ts`) components; new
+  `LoopState`s threaded through `types.ts`/`stages.ts`; `product` param
+  threaded through `lib/api.ts`/`useRunStream`/`runContext`. Added
+  `Decisions/0011-llm-action-selector-constrained-vocabulary.md` (ADR: why
+  the action-synthesis LLM is a selector over a small fixed vocabulary, never
+  a free-form command generator; alternatives considered and rejected —
+  free-form matrices, schema-only validation without pose indirection; the
+  ADR 0010 movement-adapter gap remains the reason plan-driven runs still
+  can't drive the **real** arm, only sim/mocks). Moved
+  `Tasks/active/llm_orchestrated_disassembly_plan.md` to
+  `Tasks/archive/llm_orchestrated_disassembly_plan.md`, rewritten with status
+  "implemented" and all four PRD open questions resolved (1: reuse
+  OpenRouter; 2: mock ERP as static JSON behind `PlanProvider`; 3:
+  constrained vocabulary per ADR 0011; 4: the plan replaces the sequencer
+  only — `LOCATE`/`POSE`/`INSPECT`/`SORT` machinery is unchanged between
+  modes) plus the still-open ADR 0010 prerequisite noted explicitly. Extended
+  `System/orchestrator.md`: new "Two loop modes" / "Plan mode" sections
+  (loop diagram, planning head, constrained vocabulary, `clients/openrouter.py`),
+  Protocol seam table (`PlanProvider`/`ActionSynthesizer` rows,
+  `PerceptionClient.locate`), mocks list (`MockPlanProvider`/
+  `MockActionSynthesizer`), Config table (6 new planning-head fields), Entry
+  points (`/products`, `/plan`, `product` param), Data model (`Plan`/
+  `PlanStep`/`ArmAction`), Tests section (`test_plan.py`, count 105 → 204).
+  Extended `System/architecture.md`: pipeline diagram gained the planning
+  head, stage table gained a Planning head row, "Not yet built" section
+  clarified the planning-head vision is now shipped (distinct from the
+  still-unimplemented "two future VLM roles") and real-ERP-vs-mock is
+  explicitly out of scope, Test suite section counts updated (105 → 204
+  pytest, 26 → 30 Vitest). Extended `System/dashboard.md`: new "Plan mode
+  UI" section (`ProductSelector`, `PlanProgress`, `derivePlan`), pages table,
+  components list, stage-mapping section (new states), test suite section
+  (30 tests, `derivePlan` coverage). Added ADR 0011 and the archived PRD to
+  `README.md`'s indices; updated the `System/orchestrator.md` one-liner. Not
+  covered by this update (explicitly out of scope — a separate, unrelated
+  in-flight feature also present in the working tree): the `ROBOT_TARGET`
+  real/sim/both robot selection, `TeeMovement`, `IsaacSimMovement`,
+  `contracts/simulation_api.md`/`sim_scene_capture.md`, and the frontend's
+  `SceneView`/`SourceToggle`/`PartSelector`/`lib/parts.ts` — these touch the
+  same files (`config.py`, `factory.py`, `app.py`, `loop.py`) but are a
+  distinct capability; document them in a separate pass when that work is
+  ready to capture.
+- 2026-07-08 — Captured a team vision for a head-of-pipeline + closer-of-loop
+  extension: an operator selects a part in an ERP system, an LLM generates an
+  ordered disassembly plan from the ERP data, the orchestrator executes the
+  plan step by step (querying the existing perception/pose endpoints per
+  step), an LLM synthesizes arm command(s) per step from the step's
+  instruction + the part's 6DoF pose + the movement-API documentation, and
+  (as today) a post-removal VLM fault check sorts each part into an OK or
+  reject bin. No code exists yet — this is vision only. Added
+  `Tasks/active/llm_orchestrated_disassembly_plan.md`: maps each of the four
+  articulated pieces onto current architecture (perception/pose queries and
+  the damage-VLM OK/reject sort are largely already built and reusable;
+  ERP-selection + plan-generation, and the runtime LLM command-synthesis
+  step that would replace the orchestrator's hardcoded `PLAN`/`GRASP`
+  sequencing, are wholly new) and records four explicitly open questions
+  without answering them: LLM/provider choice, ERP mock-vs-real scope,
+  guardrails on LLM-generated movement commands before they reach a real
+  robot arm (flagged safety-critical), and how plan steps map onto the
+  orchestrator's existing `LoopEvent` state model and SSE narration. No
+  implementation detail invented beyond what was stated. Added the new PRD
+  to `README.md`'s Tasks index (previously "no in-flight PRDs yet").
+- 2026-07-08 — Operational lesson from tonight's Jetson deployment (no code
+  changed; ops knowledge only). `robot_control` and `scene_camera` were
+  deployed to the lab's Jetson (`lara5@172.22.192.166`, ssh alias `jetson`)
+  via a native `python3 -m venv` + `nohup` path, **not** the documented
+  `deploy/robot-control/docker-compose.yml` path — that path is blocked on
+  this device by two infra gaps: (1) `.github/workflows/publish-images.yml`'s
+  `docker/build-push-action@v6` step has no `platforms:` key, so the
+  published GHCR image is amd64-only while the Jetson is arm64; (2) the
+  `lara5` account has no docker-group membership and no passwordless sudo,
+  so `docker compose` can't run under it at all. Added
+  `SOP/deploy_jetson_native.md`: the working clone→venv→nohup procedure for
+  both services, the `scene_camera` `--system-site-packages` requirement
+  (reuses the system Zivid SDK 2.17.1 bindings) plus its `numpy<2` +
+  `opencv-python-headless<5` pin (opencv 4.11 + numpy 1.26.4 verified
+  working — opencv≥5 needs numpy≥2, conflicting with the Zivid/nptyping
+  stack's numpy 1.x requirement), the `python -m uvicorn` invocation needed
+  because a `--system-site-packages` venv doesn't get its own `uvicorn`
+  entry point, the update (`git pull --ff-only` + kill/re-nohup) procedure,
+  and current limitations (no process supervision/no reboot survival, the
+  LARA5 robot socket server was not running at deploy time so
+  `/robot/probe` returned `Errno 111`, `WBK_API_TOKEN` unset so auth is
+  off, shared-device etiquette). Also lists what closing both infra gaps
+  above would take, for whoever revisits the compose path later. Extended
+  `System/robot_control.md`: new "Current on-device status (2026-07-08)"
+  subsection under "Deployment" stating the compose path is not what's
+  actually running, with a link to the new SOP; added the SOP to Related
+  Docs. Added the new SOP to `README.md`'s SOP index.
 - 2026-07-07 — `robot_control/` (Group 2's Jetson movement bridge) documented
   as the repo's **movement** stage (commits `604733a` "Merge robot_control
   service from robot_control branch (Group 2)", `361fe9a` "Wire robot_control

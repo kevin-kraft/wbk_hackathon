@@ -19,7 +19,7 @@ export interface RunStreamState {
   // Robot the server actually drove this run (from the SSE "start" event) — may
   // differ from the requested toggle if ROBOT_TARGET was forced server-side.
   activeTarget: string | null;
-  start: (dryRun: boolean, delaySeconds: number, target?: RobotTarget) => void;
+  start: (dryRun: boolean, delaySeconds: number, target?: RobotTarget, product?: string) => void;
   stop: () => void;
   reset: () => void;
 }
@@ -52,7 +52,7 @@ export function useRunStream(): RunStreamState {
   }, [closeSource]);
 
   const start = useCallback(
-    (dryRun: boolean, delaySeconds: number, target?: RobotTarget) => {
+    (dryRun: boolean, delaySeconds: number, target?: RobotTarget, product?: string) => {
       closeSource();
       setEvents([]);
       setStats(null);
@@ -60,7 +60,7 @@ export function useRunStream(): RunStreamState {
       setActiveTarget(null);
       setStatus("running");
 
-      const es = new EventSource(runStreamUrl(dryRun, delaySeconds, target));
+      const es = new EventSource(runStreamUrl(dryRun, delaySeconds, target, product));
       esRef.current = es;
 
       es.addEventListener("start", (e) => {

@@ -66,3 +66,11 @@ shared container there.
 - Base GPU images (`foundationpose:blackwell`, `gigapose:blackwell`) must be
   built manually from the model repos before `docker compose up` will work for
   pose — see [SOP: running the services](../SOP/running_services.md).
+
+**Update (2026-07-08):** on the remote GPU-server deployment, the shared
+container's bundled `sam3` process fails to load in practice (not yet
+root-caused). Operationally, SAM3 is now served by a second, standalone
+`wbk-sam3` container alongside `wbk-perception` on that server — a deployment
+workaround, not a reversal of the one-container decision above (the local
+`docker-compose.yml` / single-host path is unchanged). See [SOP: deploying
+perception to the GPU server](../SOP/deploy_perception_gpu_server.md).

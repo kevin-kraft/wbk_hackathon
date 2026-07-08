@@ -16,6 +16,36 @@ the loop. The system does three things:
 3. **Quality inspection (OK / not-OK)** — after removal, judge each part as OK or
    **damaged**, and sort it into a working bin or a separate reject bin.
 
+## Vision: ERP-driven, LLM-orchestrated disassembly
+
+On top of the fixed loop, the pipeline runs **plan-driven**: the operator selects
+the product on the station in an **ERP system** (mocked as a per-product dataset,
+[`orchestrator/data/erp_products.json`](orchestrator/data/erp_products.json)); an
+**LLM reads the ERP data and generates the ordered disassembly plan** ("first take
+off part A, then remove part B …"); the orchestrator executes the plan **step by
+step**, querying perception + 6DoF pose for each step's specific part; and an LLM
+can **synthesize the arm actions** for each step from the instruction + pose.
+
+```
+ ERP product pick ─► LLM plan ─► per step: locate part ─► pose ─► LLM action synthesis ─► grasp/remove/inspect/sort
+ (operator, mock)   (ordered      (perception grounds     (6DoF)   (constrained vocabulary,
+                     steps)        the plan's part)                  validated, scripted fallback)
+```
+
+Safety is structural, not prompt-deep: the action-synthesis LLM is a **selector,
+never a generator** — it picks from a fixed action vocabulary
+([`orchestrator/actions.py`](orchestrator/actions.py)) and references
+pipeline-computed poses by name; it never emits coordinates. A deterministic
+validator rejects anything outside the vocabulary before it reaches the robot,
+falling back to the scripted grasp sequence. Plan generation is similarly fenced:
+the LLM may only **order and describe** the ERP's part list, never invent parts.
+(ADR 0011 in `.agent/Decisions/` has the full rationale.)
+
+Try it: `POST /run?dry_run=true&product=gearbox-demo`; preview a plan with
+`GET /plan?product=…`; list products with `GET /products` — or pick a product in
+the dashboard's run controls and watch the plan checklist fill in live. Runs
+without a `product` keep the original perception-driven loop.
+
 ## Architecture
 
 Pipeline of containerized microservices (FastAPI, base64-in-JSON contracts). Full
@@ -105,6 +135,103 @@ Each service exposes `GET /health`, `GET /docs` (OpenAPI), and its `POST` route.
 The orchestrator additionally streams the live loop over `GET /events/run` (SSE),
 which the dashboard consumes.
 
+## Deployment
+
+The Quick start above runs everything on one machine. The **hackathon deployment is
+split across four hosts** — CPU coordination stays local, GPU inference runs on a
+shared server, and the robot/cameras live on lab hardware. Services find each other
+over **SSH port-forwards** (private, encrypted, no public exposure), and every
+endpoint is runtime-configurable in `frontend/public/config.json` /
+`deploy-local/config.json`.
+
+### Topology
+
+| Host | Runs | Reach |
+|---|---|---|
+| **Local PC** | orchestrator `:8000`, damage `:8006`, dashboard `:5173` | native / `docker compose` |
+| **GPU server** (8× RTX PRO 6000 Blackwell) | perception (`wbk-perception`: yolo→`:8001`, locate→`:8003`; `wbk-sam3`→`:8002`), pose (foundationpose `:8004`, gigapose `:8005`), **YOLO training** | direct SSH, no VPN |
+| **On-prem box** (`kip-ws`) | Isaac Sim backend `:8100` (simulated arm + scene/Zivid render) | KIT VPN (netns) |
+| **Jetson** | robot_control `:9000`, scene_camera `:9002` (LARA5 arm + Zivid) | KIT VPN (netns) |
+
+The orchestrator dials **`localhost:1800x`** for every remote service; SSH forwards
+map those onto the right host, so the orchestrator config never changes when
+services move.
+
+### 1. GPU server — perception + pose
+
+Services run as containers bound to `127.0.0.1` on the server (namespaced ports
+`6767–6772`, `8004/8005`). Open the tunnel from the local PC (the `Host gpu-server`
+block in `~/.ssh/config` carries the forwards):
+
+```bash
+ssh -N gpu-server        # forwards 18001→6767(yolo) 18002→6768(sam3) 18003→6769(locate)
+                         #          18004→8004(fpose) 18005→8005(gigapose) 6006→6772(tensorboard)
+```
+
+Then bring up the local stack pointed at the tunnels:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.remote-gpu.yml up -d orchestrator dashboard damage
+```
+
+`docker-compose.remote-gpu.yml` sets `PERCEPTION_*_URL` / `POSE_URL` to
+`localhost:18001-18005`. **Do not** also start the local `perception`/`pose`
+services — the tunnels replace them.
+
+> Base images must be **Blackwell-capable** (`*:blackwell`, PyTorch 2.8 / CUDA 12.8);
+> the stock pre-Blackwell images won't run on the RTX PRO 6000 GPUs.
+
+### 2. Training the detection / segmentation models
+
+Custom **YOLOv26** detectors + segmenters are trained on the GPU server from
+synthetic Isaac-Sim data. Full runbook in [`training/README.md`](training/README.md);
+in short:
+
+```bash
+# on the server (venv at /mnt/vss-data/kip/venv/yolo; workspace on the 3.3TB net drive)
+ssh gpu-server 'bash -s' < training/setup_server.sh          # one-time: venv + ultralytics
+# convert Isaac renders → YOLO datasets (boxes from instance masks = dense labels)
+python isaac_to_yolo.py --task detmask --src ~/output/robot_subset_train --out .../parts_detmask
+python isaac_to_yolo.py --task seg     --src ~/output/robot_subset_train --out .../parts_seg
+# train (crash-resumable supervisor, rolling last-5 + best.pt, TensorBoard at localhost:6006)
+bash train_supervised.sh --data .../parts_detmask/data.yaml --model yolo26m.pt     --name parts_detmask_v1 --device 0 --epochs 81 --imgsz 1536 --batch 16 --amp false
+bash train_supervised.sh --data .../parts_seg/data.yaml     --model yolo26m-seg.pt --name parts_seg_v1     --device 2 --epochs 57 --imgsz 1536 --batch 16 --amp false
+```
+
+Notes: `--amp false` is required (AMP triggers a CUDA illegal-access in validation on
+the Blackwell/torch-2.12 stack); all caches are redirected onto `/mnt/vss-data`
+(`source training/env.sh`) because the root disk is near-full.
+
+### 3. Deploying trained weights to the perception service
+
+The YOLO service loads `YOLO_WEIGHTS` at startup. To serve a trained model, stage the
+weights on the server and recreate the perception container with a `/weights` mount:
+
+```bash
+ssh gpu-server 'bash /mnt/vss-data/kip/code/deploy_yolo_weights.sh'
+```
+
+This copies `runs/parts_detmask_v1/weights/best.pt` → `/mnt/vss-data/kip/weights/`,
+then recreates `wbk-perception` with `-e YOLO_WEIGHTS=/weights/parts_detmask.pt -v
+/mnt/vss-data/kip/weights:/weights`. Verify: `GET :6767/health` → `loaded:true`, and
+`YOLO(weights).names` lists the 18 part classes. Reload the dashboard and detection
+runs against the real parts.
+
+### 4. Jetson (robot + cameras)
+
+Reached over the KIT VPN (isolated network namespace). `ssh jetson` forwards
+`9000` (robot_control), `9002` (scene_camera), `5005` (joint state). See
+[`deploy/`](deploy/) for the Jetson-native service units and
+[`robot_control/README.md`](robot_control/README.md).
+
+### Simulation vs. real
+
+`ROBOT_TARGET` selects the movement/camera backend: `real` (Jetson), `sim` (Isaac
+backend on the box, `MOVEMENT_SIM_URL=localhost:8100`), or `both` (mirror). Scene
+capture/preview for the Sim path is served by the Isaac backend
+(`POST /simulation/scene/{capture,preview,inspection}` — see
+[`contracts/sim_scene_capture.md`](contracts/sim_scene_capture.md)).
+
 ## Future (from the task spec — noted, not yet built)
 
 - **VLM next-part selection** — pick the next part to disassemble from a **part
@@ -130,6 +257,7 @@ pose/         FoundationPose + GigaPose       (2 GPU containers)
 damage/       OpenRouter VLM damage inspection (CPU)
 robot_control/ Jetson-side movement bridge to the LARA5 robot (CPU, :9000)
 frontend/     operator console + live demo dashboard (React/Vite static app)
+training/     YOLOv26 detection/segmentation training on synthetic Isaac data (GPU server) — see training/README.md
 deploy/       per-service standalone compose files for single-service deploys (GHCR) — see deploy/README.md
 contracts/    proposed Jetson-movement + grip-sensor APIs (hand-off to teammates)
 docs/         architecture.md

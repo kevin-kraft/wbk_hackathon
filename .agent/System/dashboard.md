@@ -6,6 +6,9 @@
 - [Integration Points & Wire Contracts](./integration_points.md) — the SSE event contract + CORS
 - [ADR 0008: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why this isn't fused into the orchestrator
 - [ADR 0009: shared-token auth](../Decisions/0009-shared-token-auth.md) — the `apiToken` field below, and why `GET /events/run` needed a query-param token transport
+- [ADR 0011: LLM action selector, constrained vocabulary](../Decisions/0011-llm-action-selector-constrained-vocabulary.md) — the `GUARDRAIL` event `PlanProgress`/the event log surface
+- [ADR 0014: robot target selection (real \| sim \| both)](../Decisions/0014-robot-target-real-sim-both.md) — the Real/Sim/Both toggle this doc's "Sim / digital-twin UI" section covers
+- `contracts/simulation_api.md` / `contracts/sim_scene_capture.md` — the Isaac Sim command-bus + (draft, unimplemented) scene-capture surfaces the sim-side UI calls
 - `frontend/README.md` (in-repo) — the module's own README; this doc adds the `.agent/` cross-reference layer on top, not a duplicate
 
 ## What it is
@@ -26,14 +29,14 @@ belt-and-braces on top of that, not the primary mechanism).
 `npm run build` runs `tsc -b && vite build` (type-check + bundle to `dist/`)
 and is verified clean.
 
-`npm test` runs a **Vitest** unit suite (26 tests, jsdom env,
+`npm test` runs a **Vitest** unit suite (30 tests, jsdom env,
 `frontend/vitest.config.ts`, `src/**/*.test.ts`) — see "Test suite" below.
 
 ## The four pages (`frontend/src/pages/`)
 
 | Page | File | What it shows |
 |---|---|---|
-| Dashboard | `DashboardPage.tsx` | Run controls (start/stop, dry-run toggle, pace/delay), the 7-stage pipeline tracker (`StageTracker`) driven by the *latest* live event, scene camera (`MjpegView`), grip telemetry, a next-part text prompt box, bin tallies, and the full event log. |
+| Dashboard | `DashboardPage.tsx` | Run controls (start/stop, dry-run toggle, pace/delay, `ProductSelector` — see "Plan mode UI" below), the 7-stage pipeline tracker (`StageTracker`) driven by the *latest* live event, `PlanProgress` (plan-driven runs only), scene camera (`MjpegView`), grip telemetry, a next-part text prompt box, bin tallies, and the full event log. |
 | Perception | `PerceptionPage.tsx` | Scene view plus the YOLO / SAM 3 / LocateAnything endpoints and their `/health` status (detection overlays are noted as future work, not yet rendered). |
 | Inspection | `InspectionPage.tsx` | Inspection camera, the damage-VLM endpoint, a per-part OK/damaged verdicts table, and bin state. |
 | Settings | `SettingsPage.tsx` | Live-editable text fields for every service endpoint and both camera stream URLs, plus run defaults (dry-run, pace) and the shared `apiToken` (see "Auth token" below); "Save & reload" persists to `localStorage`, "Reset to config.json" clears the override. |
@@ -41,8 +44,30 @@ and is verified clean.
 Shared building blocks in `frontend/src/components/`: `Layout`, `StageTracker`
 (maps loop state → one of the 7 canonical stages, see `lib/stages.ts`),
 `EventLog`, `GripTelemetry`, `BinTally`, `PromptBox`, `MjpegView` (raw
-`<img>`-based MJPEG viewer), `ServiceHealthStrip`, `ServiceInfo`, and a small
-`ui.tsx` (`Card`, etc.) primitives file.
+`<img>`-based MJPEG viewer), `ServiceHealthStrip`, `ServiceInfo`, `ui.tsx`
+(`Card`, etc.) primitives, and (added 2026-07-08, see "Plan mode UI" below)
+`ProductSelector` and `PlanProgress`.
+
+## Plan mode UI (`ProductSelector`, `PlanProgress`, added 2026-07-08)
+
+Mirrors the orchestrator's plan-driven `run(product=...)` mode (see
+[System: Orchestrator](./orchestrator.md) "Plan mode"):
+
+- **`ProductSelector`** (`frontend/src/components/ProductSelector.tsx`) —
+  a dropdown fetched from `GET /products` (`fetchProducts()` in
+  `lib/api.ts`), plumbed into `RunControls` via a `productSlot` prop.
+  `value=""` means manual/fixed mode; selecting a product threads that ID
+  through to `runOnce()`/`runStreamUrl()` as the `product` query param
+  (`lib/api.ts`, `useRunStream.start()`, `runContext.tsx`).
+- **`PlanProgress`** (`frontend/src/components/PlanProgress.tsx`) — a live
+  checklist of the generated plan, rendered only when a `PLAN_GENERATED`
+  event has arrived (returns `null` otherwise — invisible in fixed-mode
+  runs). Driven by `derivePlan(events)` (`lib/derive.ts`): the
+  `PLAN_GENERATED` event supplies the full step list (`part`, `action`);
+  subsequent `STEP` events mark a row `active` by index, `SORT` marks the
+  active row `done`, `SKIP` marks it `skipped`, `BLOCKED` marks it `blocked`.
+  Shows the plan's `source` (`static` | `llm` | `mock` | `static-fallback`)
+  above the checklist.
 
 ## Runtime endpoint config — the flexible bit (`frontend/src/config/runtime.ts`)
 
@@ -137,13 +162,19 @@ to the SSE stream, used for the health strip.
 
 Mirrors `orchestrator/loop.py`'s `LoopEvent.state` values onto the 7
 UI-facing stages: `GRIP`/`REGRASP`/`SKIP` → `GRASP`; `REMOVE`/`RECHECK` →
-`REMOVE`; `LOCATE`/`POSE`/`SORT` map 1:1; `DONE`/`BLOCKED`/`SUMMARY` map to
-`null` (terminal/non-stage, not shown as an active pipeline stage).
-`STATE_STYLE` gives each raw state a Tailwind pill style for the event log
-(e.g. `REGRASP` and `BLOCKED` both read amber/rose to read as
-attention-worthy). `frontend/src/lib/types.ts` mirrors
-`orchestrator/models.py`'s `LoopEvent`/stats shapes on the TypeScript side —
-keep these two in sync if the Python dataclasses change shape.
+`REMOVE`; `LOCATE`/`POSE`/`SORT` map 1:1; `DONE`/`BLOCKED`/`SUMMARY` (and, as
+of 2026-07-08, `PLAN_GENERATED`) map to `null` (terminal/non-stage, not
+shown as an active pipeline stage). `STEP` narration doesn't map to a stage
+either — `PlanProgress` renders it, not `StageTracker`. `STATE_STYLE` gives
+each raw state a Tailwind pill style for the event log (e.g. `REGRASP` and
+`BLOCKED` both read amber/rose to read as attention-worthy; `PLAN_GENERATED`/
+`STEP` read fuchsia as the plan-mode-specific states, `GUARDRAIL` reads
+amber alongside the other attention states). `frontend/src/lib/types.ts`
+mirrors `orchestrator/models.py`'s `LoopEvent`/stats shapes on the
+TypeScript side, including the plan-mode `LoopState` additions
+(`PLAN_GENERATED`, `STEP`, `GUARDRAIL`) and the `ErpProduct`/`PlanStepPreview`
+shapes for `/products`/`/plan` — keep these in sync if the Python dataclasses
+change shape.
 
 ## Test suite (`frontend/src/lib/derive.ts` + Vitest)
 
@@ -158,9 +189,15 @@ it unit-testable without rendering:
   `GripTelemetry`.
 - `currentPart(events)` → the active part/step derived from the latest
   `LOCATE` event, consumed by `DashboardPage`.
+- `derivePlan(events)` (added 2026-07-08) → the `PlanProgress` checklist
+  (`source` + per-step `pending`/`active`/`done`/`skipped`/`blocked` status),
+  built from the `PLAN_GENERATED` event plus `STEP`/`SORT`/`SKIP`/`BLOCKED`
+  progress events; returns `null` when no `PLAN_GENERATED` event exists yet
+  (fixed-mode runs never render `PlanProgress`).
 
-`npm test` (`vitest run`, jsdom env) runs 26 tests across 4 files:
-`src/lib/derive.test.ts` (12, the reducers above), `src/config/runtime.test.ts`
+`npm test` (`vitest run`, jsdom env) runs 30 tests across 4 files:
+`src/lib/derive.test.ts` (16, the reducers above — 4 new cases cover
+`derivePlan`), `src/config/runtime.test.ts`
 (6, the four-layer endpoint-precedence resolution described above —
 localStorage > config.json > env > localhost, trailing-slash stripping,
 fetch-failure fallback), `src/lib/stages.test.ts` (5, the

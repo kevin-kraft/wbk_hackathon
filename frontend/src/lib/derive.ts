@@ -96,3 +96,46 @@ export function currentPart(events: LoopEvent[]): CurrentPart {
   }
   return { part: "—", step: 0 };
 }
+
+// --- Plan-driven runs ------------------------------------------------------ //
+
+export interface PlanRow {
+  part: string;
+  action: string;
+  status: "pending" | "active" | "done" | "skipped" | "blocked";
+}
+
+export interface DerivedPlan {
+  source: string;
+  rows: PlanRow[];
+}
+
+/** The generated plan (from PLAN_GENERATED) with live per-step progress
+ * (STEP marks a row active; SORT completes it; SKIP/BLOCKED mark failures).
+ * Null when the run isn't plan-driven. */
+export function derivePlan(events: LoopEvent[]): DerivedPlan | null {
+  const planEvent = events.find((e) => e.state === "PLAN_GENERATED");
+  if (!planEvent) return null;
+  const steps = (planEvent.data.steps as { part: string; action: string }[] | undefined) ?? [];
+  const rows: PlanRow[] = steps.map((s) => ({ part: s.part, action: s.action, status: "pending" }));
+
+  let active = -1;
+  for (const e of events) {
+    if (e.state === "PLAN_GENERATED") continue;
+    if (e.state === "STEP") {
+      const idx = Number(e.data.index ?? 0) - 1;
+      if (idx >= 0 && idx < rows.length) {
+        active = idx;
+        rows[idx].status = "active";
+      }
+    } else if (active >= 0 && e.state === "SORT") {
+      rows[active].status = "done";
+    } else if (active >= 0 && e.state === "SKIP") {
+      // A grasp failure inside a step also emits SKIP; a BLOCKED right after upgrades it.
+      rows[active].status = "skipped";
+    } else if (active >= 0 && e.state === "BLOCKED") {
+      rows[active].status = "blocked";
+    }
+  }
+  return { source: String(planEvent.data.source ?? ""), rows };
+}

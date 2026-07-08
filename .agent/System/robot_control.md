@@ -6,6 +6,7 @@
 - [Integration Points & Wire Contracts](./integration_points.md) — the shared-token auth convention this service reuses
 - [ADR 0009: shared-token auth](../Decisions/0009-shared-token-auth.md) — the auth pattern `robot_control/app/auth.py` matches
 - [ADR 0010: robot_control integration](../Decisions/0010-robot-control-integration.md) — why/how it was containerized and wired in, and the open orchestrator-adapter gap
+- [SOP: Deploying to the Jetson via native venv](../SOP/deploy_jetson_native.md) — the actual working deploy procedure on this device today (not the compose path below)
 - `robot_control/README.md` (in-repo) — the module's own README (endpoint examples, calibration file layout); this doc adds the `.agent/` cross-reference layer, not a duplicate
 
 ## What it is
@@ -157,6 +158,29 @@ own).
 - **CI**: `.github/workflows/publish-images.yml`'s GHCR publish matrix has a
   `robot-control` entry (`context: robot_control`) alongside `orchestrator`,
   `damage`, `dashboard`.
+
+### Current on-device status (2026-07-08): running via native venv, not compose
+
+The `deploy/robot-control/docker-compose.yml` path above is **not** how this
+service actually runs on the lab's Jetson (`lara5@172.22.192.166`, ssh alias
+`jetson`) today. It is deployed instead as a plain `python3 -m venv` process
+under `nohup`, alongside `scene_camera/` (the Zivid RGB-D capture service —
+port `9002`, not otherwise documented in `System/` yet). Two infra gaps
+block the documented compose path on this specific device:
+
+1. The published GHCR image is **amd64-only** — `publish-images.yml` has no
+   `platforms:` key on its `docker/build-push-action@v6` step — but the
+   Jetson is **arm64**.
+2. The `lara5` account has no docker-group membership and no passwordless
+   `sudo`, so `docker compose` cannot run under it regardless of image arch.
+
+Full procedure, version-pin gotchas (`scene_camera` needs
+`--system-site-packages` plus `numpy<2`/`opencv-python-headless<5`), update
+steps, and current limitations (no process supervision, robot socket server
+was not running at deploy time, `WBK_API_TOKEN` unset) are in
+[SOP: Deploying to the Jetson via native venv](../SOP/deploy_jetson_native.md).
+That SOP also lists what closing both gaps above would take, if the compose
+path is worth fixing rather than working around long-term.
 
 ## What is NOT yet wired
 
