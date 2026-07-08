@@ -8,6 +8,7 @@
 - `deploy/README.md` (repo root) — the single-service GHCR deploy model for `orchestrator`/`damage`/`dashboard`; perception and pose are explicitly **not** part of that (built on the GPU server instead, see its table)
 - `perception/README.md` — "Newer GPUs (Blackwell / sm_120)" and "Deploying to a remote GPU server" sections; this SOP is the `.agent/`-side pointer to that content plus the wider topology
 - Root [`README.md`](../../README.md) "Deployment" — the canonical, current 4-host topology table this SOP's perception slice is part of
+- [System: Orchestrator](../System/orchestrator.md) "Robot target selection" / [ADR 0014](../Decisions/0014-robot-target-real-sim-both.md) — the `docker-compose.remote-gpu.yml` overlay this SOP describes also carries the Isaac Sim (`MOVEMENT_SIM_URL`) env for the same host; out of scope here, covered there
 
 ## Status: deployed and running, as of 2026-07-08
 
@@ -114,7 +115,10 @@ docker compose -f docker-compose.yml -f docker-compose.remote-gpu.yml \
 `docker-compose.remote-gpu.yml` sets `PERCEPTION_YOLO_URL=http://localhost:18001`,
 `PERCEPTION_SAM3_URL=http://localhost:18002`, `PERCEPTION_LOCATE_URL=http://localhost:18003`,
 `POSE_URL=http://localhost:18004` (and other non-perception env, e.g. the
-Isaac-Sim movement URL — out of scope here), and runs the `orchestrator`
+Isaac-Sim movement URL, `MOVEMENT_SIM_URL` — out of scope here, see
+[System: Orchestrator](../System/orchestrator.md) "Robot target selection"
+and [ADR 0014](../Decisions/0014-robot-target-real-sim-both.md)), and runs
+the `orchestrator`
 service with `network_mode: host` so `localhost:1800x` reaches the tunnels
 directly. **Do not** also start the local `perception`/`pose` services from
 the base compose file — the tunnels replace them.

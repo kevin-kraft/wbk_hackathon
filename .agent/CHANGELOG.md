@@ -2,6 +2,76 @@
 
 Newest first.
 
+- 2026-07-08 — Robot target selection (`real|sim|both`) and the Isaac Sim
+  digital-twin integration documented (working tree at capture time, not yet
+  committed; developed concurrently with, and touching some of the same
+  files as, the ERP/LLM planning-head feature captured below — the two are
+  independent capabilities). `orchestrator/config.py` gained `ROBOT_TARGET`
+  (env, default `real`) plus `MOVEMENT_SIM_URL`/`GRIP_SIM_URL`;
+  `orchestrator/factory.py:_build_robot()` resolves it to `HttpMovement`+
+  `HttpGrip` (`real`), `IsaacSimMovement`+`SimGrip`/`HttpGrip`
+  (`sim` — `clients/sim_movement.py`, a dedicated adapter for the Isaac
+  backend's async submit/poll command bus, since it doesn't speak the
+  synchronous `contracts/movement_api.md` shape), or `TeeMovement` (`both`
+  — `clients/tee_movement.py`: real arm primary/authoritative, sim mirrored
+  concurrently and best-effort, mirror faults reported as a new `SIM_WARN`
+  `LoopEvent`, never raised). Overridable per-run via the existing
+  `?target=` query param on `POST /run`/`GET /events/run` — no restart.
+  `IsaacSimMovement` maps `move_to_pose`/`move_named`/`set_gripper` onto the
+  sim's `move_tcp`/`move_joint`/`open_gripper`/`close_gripper` actions
+  (rotation→quaternion via Shepperd's method) and carries its own
+  named-pose teach table (`SIM_NAMED_POSES`/`SIM_NAMED_POSES_FILE`,
+  `deploy/sim_named_poses.example.json` — placeholder positions, not
+  measured). New contracts `contracts/simulation_api.md` (the command-bus
+  surface, named-pose gap) and `contracts/sim_scene_capture.md` (draft,
+  unimplemented — `GET_ZIVID_DATA` isn't wired up on the sim side yet, so
+  `sim`/`both` runs still need the real Zivid for perception input). 22 new
+  tests (`tests/orchestrator/test_robot_target.py`,
+  `test_sim_movement.py`), included in the still-204 pytest total (these
+  files already existed in the working tree when that count was last
+  recorded). Frontend: `RunControls` gained a Real/Sim/Both toggle
+  (disabled during dry-run/while running, sim options greyed out until a
+  simulator endpoint is configured) and an `activeTarget` badge fed by a
+  new `start` SSE listener in `useRunStream.ts`; new `SourceToggle`/
+  `PartSelector`/`SceneView` components and a full rewrite of
+  `PerceptionPage.tsx` (was a static stub; now capture→infer→overlay
+  against YOLO/SAM 3/LocateAnything, real Zivid or sim-rendered scenes);
+  `lib/api.ts` gained `captureScene`/`generateScenePreview` (both
+  normalizing a sim `404`/`501` into a `SIM_NOT_IMPLEMENTED` sentinel with a
+  friendly "not implemented yet" message) and `runYolo`/`runSam3`/
+  `runLocate`; `lib/types.ts` gained a `ConfigPatch` type (replacing ad hoc
+  `Partial<RuntimeConfig>` casts) and `SourceMode`/`RobotTarget`/`SIM_WARN`;
+  `frontend/public/config.json`'s committed perception/pose ports moved to
+  `localhost:1800{1-5}` and movement/grip to `localhost:9000`/`9001`
+  (previously a hardcoded Jetson IP), matching the SSH-tunnel convention in
+  [SOP: deploying perception to a remote GPU server](./SOP/deploy_perception_gpu_server.md).
+  **No new frontend test coverage** for the sim UI components/PerceptionPage
+  rewrite — Vitest suite stays at 30 tests; `npm run build` (type-check)
+  passes. Verified together: `uv run pytest` (204 collected) and `npm run
+  build` both pass on the full working tree (this feature + the
+  concurrently-developed planning head). Added
+  `Decisions/0014-robot-target-real-sim-both.md` (ADR: why sim is a
+  mirrored digital twin, not a peer, with `TeeMovement`'s primary/mirror
+  trust asymmetry as the safety mechanism; why `IsaacSimMovement` is a
+  dedicated adapter rather than a second `HttpMovement`; rejected
+  alternatives — a second orchestrator instance, real/sim voting). Extended
+  `System/orchestrator.md`: new "Robot target selection" section
+  (`factory.py:_build_robot`, the sim command-bus mapping table, the
+  named-pose teach-table gap), Protocol seam table's `MovementClient`/
+  `GripSensor` rows, Config section, Tests section. Extended
+  `System/architecture.md`: pipeline diagram gained the sim mirror branch,
+  stage table gained a Simulator (digital twin) row and an updated Grip
+  detection row, two new "Not yet built" bullets (sim scene capture, the
+  named-pose teach table), a test-suite cross-reference. Extended
+  `System/dashboard.md`: new "Sim / digital-twin UI" section, pages table,
+  components list, runtime-config section (new service keys, `ConfigPatch`,
+  `config.json` port changes), `useRunStream`/`runContext` prose, Test
+  suite section (the coverage-gap note). Note: ADR numbers 0012/0013 were
+  already claimed by a concurrently-run YOLO-training documentation pass
+  (see the entry below) by the time this ADR was written — this feature's
+  ADR was numbered 0014 to avoid collision; no other renumbering was
+  needed. Added the new ADR and updated the `System/orchestrator.md`/
+  `System/dashboard.md` one-liners in `README.md`'s indices.
 - 2026-07-08 — New YOLOv26 training pipeline (`training/`) documented, and the
   GPU-server perception deployment (previously "in progress, not yet running"
   in this doc set) confirmed **deployed and running**. `training/` converts
