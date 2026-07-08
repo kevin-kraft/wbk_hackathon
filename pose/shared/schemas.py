@@ -33,8 +33,12 @@ class PoseRequest(BaseModel):
     iterations: int = 5  # refine steps
     # --- GigaPose-only knobs (ignored by FoundationPose) ---
     hypotheses: int = 5
-    pipeline: str = "rgbd"  # 'rgbd' | 'rgb'
+    pipeline: str = "rgbd"  # 'rgbd' | 'rgb' | '2d'
     kabsch: bool = True  # depth-align tail on the rgbd pipeline
+    # --- 2D (planar) mode knob ---
+    # Camera-frame table depth in metres, used by pipeline='2d' when per-mask
+    # depth is unavailable. None -> fall back to a built-in default.
+    plane_z: float | None = None
 
 
 class ObjectPose(BaseModel):
