@@ -1,0 +1,23 @@
+[Unit]
+# WBK scene_camera (Zivid 2+ L110 RGB-D capture) — runs natively ON THE JETSON.
+# The Zivid is a GigE camera, so wait for the network to be up before starting.
+Description=WBK scene_camera (Zivid RGB-D capture) service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lara5
+WorkingDirectory=/home/lara5/wbk_hackathon
+# Optional: SCENE_CAMERA_BACKEND, WBK_API_TOKEN, SCENE_K, etc. Leading '-' so a
+# missing file doesn't wedge boot — config.py still defaults the backend to zivid.
+EnvironmentFile=-/home/lara5/wbk_hackathon/deploy/scene-camera/.env
+# System python3 carries the Zivid SDK (verified 2.17.1); uvicorn is pip-installed.
+ExecStart=/usr/bin/python3 -m uvicorn scene_camera.app:app --host 0.0.0.0 --port 9002
+Restart=always
+RestartSec=3
+StandardOutput=append:/home/lara5/scene-camera.log
+StandardError=append:/home/lara5/scene-camera.log
+
+[Install]
+WantedBy=multi-user.target
