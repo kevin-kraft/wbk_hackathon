@@ -23,10 +23,14 @@ def to_numpy(img: Image.Image) -> np.ndarray:
 
 
 def encode_mask_png_b64(mask: np.ndarray) -> str:
-    """Encode a boolean / 0-1 / 0-255 HxW mask as a base64 PNG (mode L)."""
-    m = mask
-    if m.dtype != np.uint8:
-        m = (m > 0).astype(np.uint8) * 255
+    """Encode a boolean / 0-1 / 0-255 HxW mask as a base64 PNG (mode L, 0/255).
+
+    Always binarizes any-nonzero -> 255. The previous `dtype != uint8` guard left
+    a uint8 0/1 mask (what Ultralytics `masks.data` yields) at 0/1, which the
+    consumers' `> 127` threshold then read as empty. `(mask > 0) * 255` is
+    idempotent for already-0/255 masks, so this is safe for every caller.
+    """
+    m = (np.asarray(mask) > 0).astype(np.uint8) * 255
     buf = io.BytesIO()
     Image.fromarray(m, mode="L").save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
