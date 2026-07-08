@@ -4,7 +4,7 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { useRunStream, type RunStreamState } from "./useRunStream";
 import { getConfig } from "../config/runtime";
-import type { RobotTarget, SourceMode } from "../lib/types";
+import type { PosePipeline, RobotTarget, SourceMode } from "../lib/types";
 
 interface RunContextValue extends RunStreamState {
   dryRun: boolean;
@@ -13,6 +13,9 @@ interface RunContextValue extends RunStreamState {
   setDelayMs: (v: number) => void;
   robotTarget: RobotTarget;
   setRobotTarget: (v: RobotTarget) => void;
+  // Pose stage pipeline (6DoF rgbd/rgb, or CAD-free 2d planar), shared across pages.
+  posePipeline: PosePipeline;
+  setPosePipeline: (v: PosePipeline) => void;
   // Scene-image source (real Zivid vs simulator), shared across pages.
   sourceMode: SourceMode;
   setSourceMode: (v: SourceMode) => void;
@@ -31,6 +34,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [dryRun, setDryRun] = useState(cfg.run.dryRun);
   const [delayMs, setDelayMs] = useState(cfg.run.stepDelayMs);
   const [robotTarget, setRobotTarget] = useState<RobotTarget>(cfg.run.robotTarget);
+  const [posePipeline, setPosePipeline] = useState<PosePipeline>(cfg.run.posePipeline);
   // Default the scene source to the sim when the robot target is sim, else real.
   const [sourceMode, setSourceMode] = useState<SourceMode>(cfg.run.robotTarget === "sim" ? "sim" : "real");
   const [prompt, setPrompt] = useState("");
@@ -46,6 +50,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
         setDelayMs,
         robotTarget,
         setRobotTarget,
+        posePipeline,
+        setPosePipeline,
         sourceMode,
         setSourceMode,
         prompt,

@@ -82,6 +82,34 @@ class YoloResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# YOLO-Seg — instance segmentation (trained parts model)                      #
+# Boxes AND per-instance masks in one pass, keyed to the same class vocabulary #
+# as the detector. Unlike SAM3/LocateAnything it is closed-vocab (no prompt).  #
+# --------------------------------------------------------------------------- #
+class YoloSegRequest(ImageInput):
+    conf: float = 0.25
+    iou: float = 0.45
+    classes: list[int] | None = None  # restrict to these class ids
+    max_det: int = 300
+
+
+class SegInstance(BaseModel):
+    box: BBox
+    mask_b64_png: str  # single-channel (L) PNG, full-res, base64-encoded
+    score: float
+    class_id: int
+    label: str
+
+
+class YoloSegResponse(BaseModel):
+    instances: list[SegInstance]
+    width: int
+    height: int
+    model: str
+    inference_ms: float
+
+
+# --------------------------------------------------------------------------- #
 # SAM3 — promptable segmentation                                              #
 # --------------------------------------------------------------------------- #
 class Sam3Request(ImageInput):

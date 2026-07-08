@@ -1,11 +1,17 @@
 import type { ReactNode } from "react";
 import type { RunStatus } from "../hooks/useRunStream";
-import type { RobotTarget } from "../lib/types";
+import type { PosePipeline, RobotTarget } from "../lib/types";
 
 const TARGETS: { value: RobotTarget; label: string; title: string }[] = [
   { value: "real", label: "Real", title: "Drive the real Jetson arm only" },
   { value: "sim", label: "Sim", title: "Drive the simulator only — no real hardware moves" },
   { value: "both", label: "Both", title: "Real arm (authoritative) + simulator mirrored as a digital twin" },
+];
+
+const POSE_PIPELINES: { value: PosePipeline; label: string; title: string }[] = [
+  { value: "rgbd", label: "6DoF", title: "FoundationPose 6DoF with depth (default)" },
+  { value: "rgb", label: "6DoF·RGB", title: "GigaPose 6DoF, RGB only (no depth)" },
+  { value: "2d", label: "2D", title: "GigaPose CAD-free planar pose from the mask — no templates; top-down/planar picking" },
 ];
 
 export default function RunControls({
@@ -16,6 +22,8 @@ export default function RunControls({
   onDelay,
   robotTarget,
   onRobotTarget,
+  posePipeline,
+  onPosePipeline,
   simAvailable,
   activeTarget,
   onStart,
@@ -30,6 +38,8 @@ export default function RunControls({
   onDelay: (v: number) => void;
   robotTarget: RobotTarget;
   onRobotTarget: (v: RobotTarget) => void;
+  posePipeline: PosePipeline;
+  onPosePipeline: (v: PosePipeline) => void;
   simAvailable: boolean;
   activeTarget: string | null;
   onStart: () => void;
@@ -101,6 +111,29 @@ export default function RunControls({
               } disabled:cursor-not-allowed disabled:opacity-40`}
             >
               {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        className="flex items-center gap-1 rounded-lg border border-zinc-700 p-0.5"
+        title={dryRun ? "Dry run uses mocks — pose stage is mocked" : "Pose stage pipeline"}
+      >
+        <span className="px-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Pose</span>
+        {POSE_PIPELINES.map((p) => {
+          const active = posePipeline === p.value;
+          return (
+            <button
+              key={p.value}
+              onClick={() => onPosePipeline(p.value)}
+              disabled={targetDisabled}
+              title={p.title}
+              className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
+                active ? "bg-sky-500 text-sky-950" : "text-zinc-400 hover:bg-zinc-800"
+              } disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              {p.label}
             </button>
           );
         })}

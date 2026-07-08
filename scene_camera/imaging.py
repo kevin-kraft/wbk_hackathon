@@ -16,6 +16,27 @@ import cv2
 import numpy as np
 
 
+def white_balance_grayworld(rgb: np.ndarray) -> np.ndarray:
+    """Gray-world white balance — neutralise a global colour cast (the Zivid
+    RGB's strong green tint) so captures sit closer to the neutral-lit training
+    distribution. Robust variant: per-channel means are taken over non-black,
+    non-saturated pixels so no-return black and blown highlights don't skew the
+    gains. Returns the input unchanged if there isn't enough mid-tone signal.
+    """
+    if rgb.ndim != 3 or rgb.shape[2] < 3:
+        return rgb
+    out = rgb[:, :, :3].astype(np.float32)
+    lum = out.mean(axis=2)
+    mask = (lum > 5) & (lum < 250)  # drop no-return black + near-saturated
+    if int(mask.sum()) < 100:
+        return rgb
+    means = np.array([out[:, :, c][mask].mean() for c in range(3)], dtype=np.float32)
+    means = np.clip(means, 1e-3, None)
+    gains = float(means.mean()) / means  # equalise channel means to their average
+    out *= gains[None, None, :]
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
 def encode_rgb_b64(rgb: np.ndarray) -> str:
     """HxWx3 uint8 RGB -> base64 PNG (stored BGR so the decoder's BGR->RGB restores RGB)."""
     if rgb.ndim != 3 or rgb.shape[2] < 3:

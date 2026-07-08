@@ -3,6 +3,7 @@
 export type ServiceKey =
   | "orchestrator"
   | "yolo"
+  | "yoloseg"
   | "sam3"
   | "locateanything"
   | "foundationpose"
@@ -28,10 +29,14 @@ export type OverlayKind = "boxes" | "masks";
 // orchestrator's ROBOT_TARGET / ?target= query param.
 export type RobotTarget = "real" | "sim" | "both";
 
+// Pose stage pipeline: 6DoF with depth (rgbd, FoundationPose), 6DoF RGB-only
+// (rgb, GigaPose), or the CAD-free planar pose (2d, GigaPose — mask-derived).
+export type PosePipeline = "rgbd" | "rgb" | "2d";
+
 export interface RuntimeConfig {
   services: Record<ServiceKey, string>;
   streams: Record<StreamKey, string>;
-  run: { dryRun: boolean; stepDelayMs: number; robotTarget: RobotTarget };
+  run: { dryRun: boolean; stepDelayMs: number; robotTarget: RobotTarget; posePipeline: PosePipeline };
   // Shared API token sent to the orchestrator (Bearer header on POST, ?token= on
   // SSE). Empty = don't send one. Matches the services' WBK_API_TOKEN.
   apiToken: string;
@@ -126,6 +131,21 @@ export interface YoloDetection {
 }
 export interface YoloResponse {
   detections: YoloDetection[];
+  width: number;
+  height: number;
+  model: string;
+  inference_ms: number;
+}
+
+export interface YoloSegInstance {
+  box: BBox;
+  mask_b64_png: string; // single-channel (L) PNG, full-res, base64 (no data-URI)
+  score: number;
+  class_id: number;
+  label: string;
+}
+export interface YoloSegResponse {
+  instances: YoloSegInstance[];
   width: number;
   height: number;
   model: string;

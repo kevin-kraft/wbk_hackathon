@@ -20,6 +20,7 @@ services:
       - PERCEPTION_SAM3_URL=http://localhost:18002
       - PERCEPTION_LOCATE_URL=http://localhost:18003
       - POSE_URL=http://localhost:18004
+      - GIGAPOSE_URL=http://localhost:18005
       # Isaac Sim backend on this host (ki_robotik_cv_seminar, port 8100)
       - MOVEMENT_SIM_URL=${MOVEMENT_SIM_URL:-http://localhost:8100}
       - ROBOT_TARGET=${ROBOT_TARGET:-sim}

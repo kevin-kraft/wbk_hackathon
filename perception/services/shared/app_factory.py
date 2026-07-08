@@ -54,9 +54,15 @@ def create_service_app(*, service_name: str, model: BasePerceptionModel) -> Fast
 
     @app.exception_handler(Exception)
     async def on_error(request: Request, exc: Exception) -> JSONResponse:
+        # A handler for the bare Exception class runs in Starlette's outermost
+        # ServerErrorMiddleware, ABOVE the CORS middleware — so its response
+        # never gets an Access-Control-Allow-Origin header and the browser
+        # reports the 500 as an opaque "network error" instead of HTTP 500.
+        # Re-add the CORS header here (origins are "*") so errors surface cleanly.
         return JSONResponse(
             status_code=500,
             content={"error": type(exc).__name__, "detail": str(exc)},
+            headers={"Access-Control-Allow-Origin": "*"},
         )
 
     return app

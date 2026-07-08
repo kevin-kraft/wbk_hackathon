@@ -12,7 +12,7 @@ export interface Part {
 }
 
 export const SUPPORTED_PARTS: Part[] = [
-  { id: "anker", label: "Anker", prompt: "anker" },
+  { id: "anker", label: "Anker", prompt: "copper part" },
   { id: "buerstenhalter", label: "Bürstenhalter", prompt: "bürstenhalter" },
   { id: "poltopf", label: "Poltopf", prompt: "poltopf" },
 ];

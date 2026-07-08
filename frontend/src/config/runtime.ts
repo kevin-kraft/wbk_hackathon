@@ -17,6 +17,7 @@ const OVERRIDE_KEY = "wbk.config.overrides";
 const SERVICE_KEYS: ServiceKey[] = [
   "orchestrator",
   "yolo",
+  "yoloseg",
   "sam3",
   "locateanything",
   "foundationpose",
@@ -36,6 +37,7 @@ function localhostDefaults(): RuntimeConfig {
     services: {
       orchestrator: "http://localhost:8000",
       yolo: "http://localhost:8001",
+      yoloseg: "http://localhost:8007",
       sam3: "http://localhost:8002",
       locateanything: "http://localhost:8003",
       foundationpose: "http://localhost:8004",
@@ -51,7 +53,7 @@ function localhostDefaults(): RuntimeConfig {
       sceneCapture: "http://localhost:9002",
     },
     streams: { sceneCamera: "", inspectionCamera: "" },
-    run: { dryRun: true, stepDelayMs: 700, robotTarget: "real" },
+    run: { dryRun: true, stepDelayMs: 700, robotTarget: "real", posePipeline: "rgbd" },
     apiToken: "",
   };
 }
@@ -62,6 +64,7 @@ function envDefaults(): ConfigPatch {
   const svcEnv: Record<string, string | undefined> = {
     orchestrator: ENV.VITE_ORCHESTRATOR_URL,
     yolo: ENV.VITE_YOLO_URL,
+    yoloseg: ENV.VITE_YOLOSEG_URL,
     sam3: ENV.VITE_SAM3_URL,
     locateanything: ENV.VITE_LOCATEANYTHING_URL,
     foundationpose: ENV.VITE_FOUNDATIONPOSE_URL,

@@ -3,7 +3,8 @@
 ## Related Docs
 - [Architecture](../System/architecture.md) — Stage 1 Perception (`perception/`), the service/port map
 - [Integration Points](../System/integration_points.md) — the HF weight cache mount, the `/infer` contract, shared-token auth
-- [System: Training](../System/training.md) — where the deployed weights (`YOLO_WEIGHTS`) come from
+- [System: Training](../System/training.md) — where the deployed weights (`YOLO_WEIGHTS`/`YOLO_SEG_WEIGHTS`) come from
+- [ADR 0015: YOLO-Seg sidecar container, no rebuild](../Decisions/0015-yoloseg-sidecar-container-no-rebuild.md) — why `wbk-yoloseg` is a third container instead of a `wbk-perception` rebuild
 - [SOP: running the services](./running_services.md) — the local/single-host `docker compose up perception` path this SOP is an alternative to
 - `deploy/README.md` (repo root) — the single-service GHCR deploy model for `orchestrator`/`damage`/`dashboard`; perception and pose are explicitly **not** part of that (built on the GPU server instead, see its table)
 - `perception/README.md` — "Newer GPUs (Blackwell / sm_120)" and "Deploying to a remote GPU server" sections; this SOP is the `.agent/`-side pointer to that content plus the wider topology
@@ -57,7 +58,7 @@ instead of the stock default — that's a separate mount, covered below.
 
 ## Running containers on the server (bound to localhost only)
 
-Two containers run on the GPU server, **not** the single-container-via-supervisord
+**Three** containers run on the GPU server, **not** the single-container-via-supervisord
 layout `docker-compose.yml` describes for local/single-host use (see ADR 0001
 for why perception is normally one shared container):
 
@@ -65,21 +66,45 @@ for why perception is normally one shared container):
 |---|---|---|---|
 | `wbk-perception` | `yolo` (`:8001`→`6767`), `locateanything` (`:8003`→`6769`) | `6767`, `6769` | `device=1` |
 | `wbk-sam3` | `sam3` (`:8002`→`6768`) | `6768` | (separate) |
+| `wbk-yoloseg` | `yoloseg` (`:8007`→`6770`) | `6770` | `device=1` (co-located with `wbk-perception`) |
 
-`wbk-perception` still runs all three services under `supervisord`
-(`perception/supervisord.conf`, unchanged from the single-container design),
-but the `sam3` process **inside it fails to load** on this server — a
-deployment-specific quirk, not yet root-caused this session. Real SAM3
-traffic is served instead by the standalone `wbk-sam3` container on `:8002`
-(`6768` on the server). Do not assume `wbk-perception`'s bundled `sam3`
-process is usable; route SAM3 calls at `6768`/tunnel `18002` regardless of
-which container "owns" port 8002 in the compose file.
+`wbk-perception` still runs all three of its original services under
+`supervisord` (`perception/supervisord.conf`, unchanged from the
+single-container design), but the `sam3` process **inside it fails to load**
+on this server — a deployment-specific quirk, not yet root-caused this
+session. Real SAM3 traffic is served instead by the standalone `wbk-sam3`
+container on `:8002` (`6768` on the server). Do not assume `wbk-perception`'s
+bundled `sam3` process is usable; route SAM3 calls at `6768`/tunnel `18002`
+regardless of which container "owns" port 8002 in the compose file.
+
+`wbk-yoloseg` (added 2026-07-08) is a **third sidecar**, for a different
+reason than `wbk-sam3`: it doesn't work around a broken in-image process, it
+runs a service (`yoloseg`) that didn't exist yet when `wbk-perception:blackwell`
+was built. Rather than rebuild that image, `wbk-yoloseg` runs from the
+*same* image with the current `perception/` source bind-mounted over
+`/app/perception` (so it picks up the `services/yoloseg/` code without the
+image needing to contain it) and an overridden command
+(`uvicorn services.yoloseg.main:app --port 8007` instead of `supervisord`),
+so it serves *only* `yoloseg` — see
+[ADR 0015](../Decisions/0015-yoloseg-sidecar-container-no-rebuild.md) for
+the full rationale and consequences (notably: `wbk-perception`'s own baked-in
+source is now stale relative to the repo, but that's fine since nothing
+inside it needs the new code).
+
+**Host-port gotcha, worth repeating:** the GPU server is shared with other
+teams. Host port `8001` belongs to a **different team's** service, not this
+project's `yolo`. This project's four perception ports on the host are
+`6767` (`yolo`), `6768` (`sam3`), `6769` (`locateanything`), `6770`
+(`yoloseg`) — the container-internal ports `8001`/`8002`/`8003`/`8007` never
+appear on the host's port space. Don't `curl gpu-server:8001` expecting this
+project's detector.
 
 Base container image: `wbk-perception:blackwell` (see build command above).
 Recreating `wbk-perception` with new weights uses `docker run` directly (see
 [System: Training](../System/training.md) "Deployment: `deploy_yolo_weights.sh`"),
 not `docker compose` — the server-side deployment is hand-run, not
-compose-managed.
+compose-managed. `wbk-yoloseg` is deployed/redeployed the same hand-run way,
+via `training/deploy_yolo_seg.sh` (see below).
 
 Notes:
 - Ports are bound to `127.0.0.1` on the server, never exposed on its public
@@ -100,7 +125,7 @@ tunnel from the local machine:
 
 ```bash
 ssh -N gpu-server
-# forwards: 18001->6767(yolo)  18002->6768(sam3)  18003->6769(locate)
+# forwards: 18001->6767(yolo)  18002->6768(sam3)  18003->6769(locate)  18007->6770(yoloseg)
 #           18004->8004(fpose) 18005->8005(gigapose) 6006->6772(tensorboard)
 ```
 
@@ -127,6 +152,41 @@ This is why the server binds every port to `127.0.0.1` instead of `0.0.0.0`:
 the tunnel is the only intended ingress path. TensorBoard for training runs
 (port `6772`→local `6006`) rides the same tunnel — see [System:
 Training](../System/training.md).
+
+Note: `yoloseg` (tunnel `18007`) is **not** consumed by the orchestrator —
+`docker-compose.remote-gpu.yml` has no `PERCEPTION_YOLOSEG_URL` because
+`orchestrator/clients/`'s `PerceptionClient` never calls it. It's wired only
+through the dashboard's own runtime config
+(`frontend/public/config.json`/`deploy-local/config.json`'s `yoloseg` key,
+see [System: Dashboard](../System/dashboard.md)) for manual inspection on
+the Perception page. Bring up the tunnel regardless if you want that page's
+YOLO-Seg option to work.
+
+## Deploying the trained YOLO-Seg (instance segmentation) model
+
+Run on the server after a `parts_seg_v1`-style training run completes (see
+[System: Training](../System/training.md)):
+
+```bash
+# 1. from the laptop/dev machine: sync the *current* perception/ source —
+#    the running wbk-perception:blackwell image predates the yoloseg service
+#    dir, so the sidecar container needs it mounted, not baked in.
+rsync -a --delete perception/ gpu-server:/mnt/vss-data/kip/perception/
+
+# 2. on the server: stage weights + (re)create the wbk-yoloseg sidecar
+ssh gpu-server 'bash /mnt/vss-data/kip/code/deploy_yolo_seg.sh'
+```
+
+This is a **new sidecar container** (`wbk-yoloseg`, `127.0.0.1:6770:8007`,
+`--gpus device=1`, co-located with `wbk-perception`), not a
+`wbk-perception` recreate — see [ADR
+0015](../Decisions/0015-yoloseg-sidecar-container-no-rebuild.md) for why,
+and [System: Training](../System/training.md) "Deployment:
+`deploy_yolo_seg.sh`" for the full script breakdown (the source-sync sanity
+check, the mount/env layout, the health-check poll) and the current
+model's mAP/recall numbers. Verified end-to-end against a real dataset
+frame: 8 masks at 0.96–0.99 confidence, valid full-res PNG masks (alongside
+7 `parts_detmask` detection boxes at 0.99–1.0 from the same frame).
 
 ## Deploying newly trained YOLO weights
 

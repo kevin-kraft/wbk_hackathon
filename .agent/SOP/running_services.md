@@ -9,7 +9,9 @@
 - [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — the optional `WBK_API_TOKEN` referenced below
 - [SOP: running the tests](./running_tests.md)
 - [SOP: running the orchestrator dry-run](./running_orchestrator_dry_run.md) — run the full loop with no services/GPU/hardware at all
-- [SOP: deploying perception to a remote GPU server](./deploy_perception_gpu_server.md) — the distributed-host alternative to this single-host path; in progress, not yet running
+- [SOP: deploying perception to a remote GPU server](./deploy_perception_gpu_server.md) — the distributed-host alternative to this single-host path; deployed and running
+- [SOP: deploying the pose services (podman)](./deploy_pose_podman.md) — the distributed-host alternative for pose specifically; **podman**, not docker, unlike perception's sibling deployment
+- [ADR 0016: GigaPose 2D (planar) pose mode](../Decisions/0016-gigapose-2d-planar-pose-mode.md) — the CAD-free pipeline this SOP's `gigapose` still requires per-object templates for by default
 
 All commands below run from the repo root (`/home/yannic/code/wbk-hackerthon`)
 unless noted. Everything is driven by the single `docker-compose.yml`.
@@ -44,7 +46,7 @@ BASE_IMAGE=pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel ...`. This is also the
 starting point for deploying perception to a separate GPU server rather than
 running it alongside the other services locally — see
 [SOP: deploying perception to a remote GPU server](./deploy_perception_gpu_server.md)
-(in progress, not yet running).
+— deployed and running as of 2026-07-08.
 
 Weights: the compose file mounts `hf-cache:/root/.cache/huggingface` (a named
 volume) and `./weights:/weights` (bind mount, `WEIGHTS_DIR=/weights`). Per the

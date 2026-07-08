@@ -4,7 +4,8 @@ import { Dot } from "./ui";
 
 const SHORT: Record<ServiceKey, string> = {
   orchestrator: "orch",
-  yolo: "yolo",
+  yolo: "yolo·det",
+  yoloseg: "yolo·seg",
   sam3: "sam3",
   locateanything: "locate",
   foundationpose: "fpose",
