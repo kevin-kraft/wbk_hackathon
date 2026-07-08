@@ -1,4 +1,11 @@
 import type { RunStatus } from "../hooks/useRunStream";
+import type { RobotTarget } from "../lib/types";
+
+const TARGETS: { value: RobotTarget; label: string; title: string }[] = [
+  { value: "real", label: "Real", title: "Drive the real Jetson arm only" },
+  { value: "sim", label: "Sim", title: "Drive the simulator only — no real hardware moves" },
+  { value: "both", label: "Both", title: "Real arm (authoritative) + simulator mirrored as a digital twin" },
+];
 
 export default function RunControls({
   status,
@@ -6,6 +13,10 @@ export default function RunControls({
   onDryRun,
   delayMs,
   onDelay,
+  robotTarget,
+  onRobotTarget,
+  simAvailable,
+  activeTarget,
   onStart,
   onStop,
   onReset,
@@ -15,11 +26,22 @@ export default function RunControls({
   onDryRun: (v: boolean) => void;
   delayMs: number;
   onDelay: (v: number) => void;
+  robotTarget: RobotTarget;
+  onRobotTarget: (v: RobotTarget) => void;
+  simAvailable: boolean;
+  activeTarget: string | null;
   onStart: () => void;
   onStop: () => void;
   onReset: () => void;
 }) {
   const running = status === "running";
+  // Target only matters for a live run; mocks ignore it.
+  const targetDisabled = running || dryRun;
+  const ACTIVE_LABEL: Record<string, string> = {
+    real: "▶ REAL ARM",
+    sim: "▶ SIMULATOR",
+    both: "▶ REAL + SIM",
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -57,6 +79,29 @@ export default function RunControls({
         Dry run (mocks)
       </label>
 
+      <div
+        className="flex items-center gap-1 rounded-lg border border-zinc-700 p-0.5"
+        title={dryRun ? "Dry run uses mocks — robot target is ignored" : "Which robot to drive"}
+      >
+        {TARGETS.map((t) => {
+          const unavailable = t.value !== "real" && !simAvailable;
+          const active = robotTarget === t.value;
+          return (
+            <button
+              key={t.value}
+              onClick={() => onRobotTarget(t.value)}
+              disabled={targetDisabled || unavailable}
+              title={unavailable ? "Set the simulator endpoint in Settings first" : t.title}
+              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                active ? "bg-sky-500 text-sky-950" : "text-zinc-400 hover:bg-zinc-800"
+              } disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
       <label className="flex items-center gap-2 text-sm text-zinc-400">
         Pace
         <input
@@ -72,8 +117,16 @@ export default function RunControls({
         <span className="w-12 font-mono text-xs tabular-nums text-zinc-500">{delayMs}ms</span>
       </label>
 
+      {activeTarget && !dryRun && (
+        <span
+          className="ml-auto rounded-full bg-zinc-700/40 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-300"
+          title="Robot the server drove this run"
+        >
+          {ACTIVE_LABEL[activeTarget] ?? activeTarget}
+        </span>
+      )}
       <span
-        className={`ml-auto rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider ${
+        className={`${activeTarget && !dryRun ? "" : "ml-auto"} rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider ${
           status === "running"
             ? "bg-sky-500/15 text-sky-300"
             : status === "done"

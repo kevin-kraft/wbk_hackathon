@@ -25,3 +25,6 @@ damage/reference/
 
 # OS
 .DS_Store
+
+# Local runtime deploy (secrets, host-specific config)
+deploy-local/

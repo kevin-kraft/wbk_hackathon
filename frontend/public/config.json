@@ -1,15 +1,15 @@
 {
-  "_comment": "Runtime endpoint config. Edit this file on the DEPLOYED machine to point the dashboard at wherever each microservice actually lives — no rebuild needed. Each service can be on a different host. The Settings page can override any of these live (stored in the browser). Precedence: Settings-page override > this file > build-time VITE_* defaults > localhost.",
+  "_comment": "Runtime endpoint config. Edit this file on the DEPLOYED machine to point the dashboard at wherever each microservice actually lives \u2014 no rebuild needed. Each service can be on a different host. The Settings page can override any of these live (stored in the browser). Precedence: Settings-page override > this file > build-time VITE_* defaults > localhost.",
   "services": {
     "orchestrator": "http://localhost:8000",
-    "yolo": "http://localhost:8001",
-    "sam3": "http://localhost:8002",
-    "locateanything": "http://localhost:8003",
-    "foundationpose": "http://localhost:8004",
-    "gigapose": "http://localhost:8005",
+    "yolo": "http://localhost:18001",
+    "sam3": "http://localhost:18002",
+    "locateanything": "http://localhost:18003",
+    "foundationpose": "http://localhost:18004",
+    "gigapose": "http://localhost:18005",
     "damage": "http://localhost:8006",
-    "movement": "http://172.22.192.166:9000",
-    "grip": "http://172.22.192.166:9001"
+    "movement": "http://localhost:9000",
+    "grip": "http://localhost:9001"
   },
   "streams": {
     "sceneCamera": "http://localhost:8080/stream.mjpg",

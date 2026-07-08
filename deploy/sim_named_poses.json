@@ -1,0 +1,11 @@
+{
+  "_comment": "Named-waypoint teach table for the Isaac sim (robot_target=sim|both). Copy to sim_named_poses.json, replace the PLACEHOLDER positions with measured TCP poses, and set SIM_NAMED_POSES_FILE=/abs/path/to/sim_named_poses.json (or paste the object into SIM_NAMED_POSES). Positions are [x,y,z] in METRES in the robot BASE frame; orientation_quat is [w,x,y,z] ([0,1,0,0] = tool pointing straight down). Per entry you may instead use {\"type\":\"move_joint\",\"params\":{\"joints\":[j1..j6,gL,gR]}} (8 DOF, gripper-open = -0.006/0.006). inspect_* are only needed once the sim inspection camera lands; the count follows INSPECTION_ANGLES.",
+
+  "home":       { "type": "move_tcp", "params": { "position": [0.40, 0.00, 0.55], "orientation_quat": [0, 1, 0, 0] } },
+  "clearance":  { "type": "move_tcp", "params": { "position": [0.40, 0.00, 0.65], "orientation_quat": [0, 1, 0, 0] } },
+  "ok_bin":     { "type": "move_tcp", "params": { "position": [0.30, -0.35, 0.45], "orientation_quat": [0, 1, 0, 0] } },
+  "reject_bin": { "type": "move_tcp", "params": { "position": [0.30, 0.35, 0.45], "orientation_quat": [0, 1, 0, 0] } },
+  "inspect_0":  { "type": "move_tcp", "params": { "position": [0.45, 0.00, 0.50], "orientation_quat": [0, 1, 0, 0] } },
+  "inspect_1":  { "type": "move_tcp", "params": { "position": [0.45, 0.10, 0.50], "orientation_quat": [0, 1, 0, 0] } },
+  "inspect_2":  { "type": "move_tcp", "params": { "position": [0.45, -0.10, 0.50], "orientation_quat": [0, 1, 0, 0] } }
+}

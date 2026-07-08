@@ -55,6 +55,8 @@ export const STATE_STYLE: Record<string, string> = {
   SORT: "bg-indigo-500/15 text-indigo-300 ring-indigo-500/30",
   SKIP: "bg-rose-500/15 text-rose-300 ring-rose-500/30",
   BLOCKED: "bg-rose-500/15 text-rose-300 ring-rose-500/30",
+  // Simulator mirror hiccup during a `both` run — a warning, not a run failure.
+  SIM_WARN: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
   DONE: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
   SUMMARY: "bg-zinc-500/15 text-zinc-300 ring-zinc-500/30",
 };

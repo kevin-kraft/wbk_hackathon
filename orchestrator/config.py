@@ -66,8 +66,22 @@ class OrchestratorConfig:
     scene_camera_url: str = field(default_factory=lambda: os.getenv("SCENE_CAMERA_URL", ""))
 
     # --- teammate-owned endpoints (see contracts/) ---
+    # The REAL robot on the Jetson.
     movement_url: str = field(default_factory=lambda: os.getenv("MOVEMENT_URL", "http://jetson.local:9000"))
     grip_url: str = field(default_factory=lambda: os.getenv("GRIP_URL", "http://jetson.local:9001"))
+    # A SIMULATED robot (digital twin) implementing the same movement contract
+    # (contracts/movement_api.md) and, ideally, the grip contract too. Empty until
+    # the sim endpoint lands. See contracts/simulation_api.md.
+    movement_sim_url: str = field(default_factory=lambda: os.getenv("MOVEMENT_SIM_URL", ""))
+    grip_sim_url: str = field(default_factory=lambda: os.getenv("GRIP_SIM_URL", ""))
+    # Which robot the loop drives:
+    #   "real" — the Jetson arm only (default; unchanged behaviour)
+    #   "sim"  — the simulator only (safe dry-motion; no real hardware moves)
+    #   "both" — drive BOTH in parallel; the real arm is authoritative (its errors
+    #            fail the step + its grip sensor gates), the sim mirrors for a live
+    #            digital-twin view and its faults never break a real run.
+    # Overridable per-run via the /run?target= query param (no restart needed).
+    robot_target: str = field(default_factory=lambda: os.getenv("ROBOT_TARGET", "real").strip().lower())
 
     # --- behaviour ---
     next_part_query: str = field(default_factory=lambda: os.getenv("NEXT_PART_QUERY", "the next part to remove to disassemble this object"))

@@ -12,12 +12,18 @@ from ..config import OrchestratorConfig
 
 
 class HttpMovement:
-    def __init__(self, config: OrchestratorConfig) -> None:
+    """One movement backend. `base_url` selects which robot it drives — the real
+    Jetson arm (`config.movement_url`, the default) or the simulator
+    (`config.movement_sim_url`). Both speak the same contract, so the loop is
+    agnostic; the factory picks the URL per `robot_target`."""
+
+    def __init__(self, config: OrchestratorConfig, base_url: str | None = None) -> None:
         self.c = config
+        self.base_url = base_url or config.movement_url
         self._http = httpx.Client(timeout=config.http_timeout_s)
 
     def _post(self, path: str, body: dict) -> dict:
-        r = self._http.post(f"{self.c.movement_url}{path}", json=body)
+        r = self._http.post(f"{self.base_url}{path}", json=body)
         r.raise_for_status()
         return r.json()
 

@@ -1,0 +1,28 @@
+# Override for the split deployment (2026-07-08): GPU services (perception,
+# pose) run on the RTX 6000 gpu-server behind SSH tunnels bound on THIS host's
+# localhost (18001-18005 — 8001 is occupied locally by mas-api), and the Isaac
+# Sim backend runs natively on this host (:8100). The orchestrator uses host
+# networking (matching the previously hand-run setup) so 127.0.0.1 reaches the
+# tunnels and the sim directly.
+#
+# Usage:
+#   1. Open the tunnels:   ssh -N gpu-server        (forwards 18001-18005)
+#   2. Start the sim:      ~/code/ki_robotik_cv_seminar/deploy/start_simulation_backend_local.sh
+#   3. Bring up the stack: docker compose -f docker-compose.yml -f docker-compose.remote-gpu.yml \
+#                            up -d orchestrator dashboard damage
+#      (do NOT start the local perception/foundationpose/gigapose services —
+#       they are what the tunnels replace)
+services:
+  orchestrator:
+    network_mode: host
+    environment:
+      - PERCEPTION_YOLO_URL=http://localhost:18001
+      - PERCEPTION_SAM3_URL=http://localhost:18002
+      - PERCEPTION_LOCATE_URL=http://localhost:18003
+      - POSE_URL=http://localhost:18004
+      # Isaac Sim backend on this host (ki_robotik_cv_seminar, port 8100)
+      - MOVEMENT_SIM_URL=${MOVEMENT_SIM_URL:-http://localhost:8100}
+      - ROBOT_TARGET=${ROBOT_TARGET:-sim}
+      - SIM_NAMED_POSES_FILE=/app/deploy/sim_named_poses.json
+    volumes:
+      - ./deploy/sim_named_poses.json:/app/deploy/sim_named_poses.json:ro

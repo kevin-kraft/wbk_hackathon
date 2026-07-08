@@ -25,6 +25,12 @@ services:
       # Teammate-owned endpoints (external Jetson) — set to real hosts:
       - MOVEMENT_URL=${MOVEMENT_URL:-http://jetson.local:9000}
       - GRIP_URL=${GRIP_URL:-http://jetson.local:9001}
+      # Simulator (Isaac Sim backend, command bus). Which robot the loop drives:
+      # real | sim | both. sim/both need MOVEMENT_SIM_URL set. The dashboard can
+      # also override this per-run via /run?target=. See contracts/simulation_api.md.
+      - ROBOT_TARGET=${ROBOT_TARGET:-real}
+      - MOVEMENT_SIM_URL=${MOVEMENT_SIM_URL:-}
+      - GRIP_SIM_URL=${GRIP_SIM_URL:-}
       # Shared-token auth (empty = disabled). Same token for all our services.
       - WBK_API_TOKEN=${WBK_API_TOKEN:-}
 

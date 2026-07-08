@@ -12,6 +12,9 @@ const SHORT: Record<ServiceKey, string> = {
   damage: "damage",
   movement: "move",
   grip: "grip",
+  movementSim: "move·sim",
+  gripSim: "grip·sim",
+  sceneCapture: "zivid",
 };
 
 export default function ServiceHealthStrip({ health }: { health: HealthMap }) {

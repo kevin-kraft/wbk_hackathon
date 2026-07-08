@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { RuntimeConfig, ServiceKey, StreamKey } from "../lib/types";
+import type { RobotTarget, RuntimeConfig, ServiceKey, StreamKey } from "../lib/types";
 import { getConfig, saveOverrides, clearOverrides, getOverrides, SERVICE_KEYS, STREAM_KEYS } from "../config/runtime";
 import { Card } from "../components/ui";
 
@@ -13,6 +13,9 @@ const SERVICE_LABEL: Record<ServiceKey, string> = {
   damage: "Damage VLM",
   movement: "Movement (Jetson)",
   grip: "Grip sensor",
+  movementSim: "Movement — simulator",
+  gripSim: "Grip — simulator",
+  sceneCapture: "Scene capture (Zivid)",
 };
 
 const STREAM_LABEL: Record<StreamKey, string> = {
@@ -112,7 +115,28 @@ export default function SettingsPage() {
             />
             ms
           </label>
+          <label className="flex items-center gap-2 text-sm text-zinc-300">
+            Robot target
+            <select
+              value={cfg.run.robotTarget}
+              onChange={(e) =>
+                setCfg((c) => ({ ...c, run: { ...c.run, robotTarget: e.target.value as RobotTarget } }))
+              }
+              className="rounded-lg border border-zinc-700 bg-zinc-950/60 px-2 py-1 text-xs text-zinc-200 focus:border-sky-500 focus:outline-none"
+            >
+              <option value="real">Real (Jetson arm)</option>
+              <option value="sim">Sim (simulator only)</option>
+              <option value="both">Both (real + sim twin)</option>
+            </select>
+          </label>
         </div>
+        <p className="mt-3 text-[12px] leading-snug text-zinc-500">
+          <span className="font-medium text-zinc-400">Sim</span> and{" "}
+          <span className="font-medium text-zinc-400">Both</span> require the{" "}
+          <code className="font-mono">Movement — simulator</code> endpoint above.{" "}
+          <span className="font-medium text-zinc-400">Both</span> drives the real arm
+          (authoritative) and mirrors every motion to the simulator as a live digital twin.
+        </p>
       </Card>
 
       <div className="flex items-center gap-3">

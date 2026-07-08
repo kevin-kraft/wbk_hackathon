@@ -10,7 +10,7 @@
 //
 // loadConfig() is awaited once in main.tsx before the app renders.
 
-import type { RuntimeConfig, ServiceKey, StreamKey } from "../lib/types";
+import type { ConfigPatch, RuntimeConfig, ServiceKey, StreamKey } from "../lib/types";
 
 const OVERRIDE_KEY = "wbk.config.overrides";
 
@@ -24,6 +24,9 @@ const SERVICE_KEYS: ServiceKey[] = [
   "damage",
   "movement",
   "grip",
+  "movementSim",
+  "gripSim",
+  "sceneCapture",
 ];
 
 const STREAM_KEYS: StreamKey[] = ["sceneCamera", "inspectionCamera"];
@@ -40,16 +43,22 @@ function localhostDefaults(): RuntimeConfig {
       damage: "http://localhost:8006",
       movement: "http://localhost:9000",
       grip: "http://localhost:9001",
+      // Simulator endpoints — blank until the sim lands; health tiles read
+      // "unknown" and the sim/both run modes stay unavailable until set.
+      movementSim: "",
+      gripSim: "",
+      // Real Zivid RGB-D capture service (scene_camera, POST /capture).
+      sceneCapture: "http://localhost:9002",
     },
     streams: { sceneCamera: "", inspectionCamera: "" },
-    run: { dryRun: true, stepDelayMs: 700 },
+    run: { dryRun: true, stepDelayMs: 700, robotTarget: "real" },
     apiToken: "",
   };
 }
 
 const ENV = import.meta.env as Record<string, string | undefined>;
 
-function envDefaults(): Partial<RuntimeConfig> {
+function envDefaults(): ConfigPatch {
   const svcEnv: Record<string, string | undefined> = {
     orchestrator: ENV.VITE_ORCHESTRATOR_URL,
     yolo: ENV.VITE_YOLO_URL,
@@ -60,6 +69,9 @@ function envDefaults(): Partial<RuntimeConfig> {
     damage: ENV.VITE_DAMAGE_URL,
     movement: ENV.VITE_MOVEMENT_URL,
     grip: ENV.VITE_GRIP_URL,
+    movementSim: ENV.VITE_MOVEMENT_SIM_URL,
+    gripSim: ENV.VITE_GRIP_SIM_URL,
+    sceneCapture: ENV.VITE_SCENE_CAPTURE_URL,
   };
   const services: Partial<Record<ServiceKey, string>> = {};
   for (const k of SERVICE_KEYS) if (svcEnv[k]) services[k] = svcEnv[k]!;
@@ -68,16 +80,13 @@ function envDefaults(): Partial<RuntimeConfig> {
   if (ENV.VITE_SCENE_CAMERA_URL) streams.sceneCamera = ENV.VITE_SCENE_CAMERA_URL;
   if (ENV.VITE_INSPECTION_CAMERA_URL) streams.inspectionCamera = ENV.VITE_INSPECTION_CAMERA_URL;
 
-  const patch: Partial<RuntimeConfig> = {
-    services: services as RuntimeConfig["services"],
-    streams: streams as RuntimeConfig["streams"],
-  };
+  const patch: ConfigPatch = { services, streams };
   if (ENV.VITE_API_TOKEN) patch.apiToken = ENV.VITE_API_TOKEN;
   return patch;
 }
 
 // Deep-ish merge limited to our known shape (services / streams / run).
-function merge(base: RuntimeConfig, patch?: Partial<RuntimeConfig> | null): RuntimeConfig {
+function merge(base: RuntimeConfig, patch?: ConfigPatch | null): RuntimeConfig {
   if (!patch) return base;
   return {
     services: { ...base.services, ...(patch.services ?? {}) },
@@ -94,17 +103,17 @@ function stripTrailingSlashes(cfg: RuntimeConfig): RuntimeConfig {
   return cfg;
 }
 
-export function getOverrides(): Partial<RuntimeConfig> | null {
+export function getOverrides(): ConfigPatch | null {
   try {
     const raw = localStorage.getItem(OVERRIDE_KEY);
-    return raw ? (JSON.parse(raw) as Partial<RuntimeConfig>) : null;
+    return raw ? (JSON.parse(raw) as ConfigPatch) : null;
   } catch {
     return null;
   }
 }
 
 /** Persist Settings-page overrides. Caller reloads the app to apply. */
-export function saveOverrides(patch: Partial<RuntimeConfig>): void {
+export function saveOverrides(patch: ConfigPatch): void {
   localStorage.setItem(OVERRIDE_KEY, JSON.stringify(patch));
 }
 
@@ -121,7 +130,7 @@ export async function loadConfig(): Promise<RuntimeConfig> {
   try {
     const res = await fetch("config.json", { cache: "no-store" });
     if (res.ok) {
-      const fileCfg = (await res.json()) as Partial<RuntimeConfig>;
+      const fileCfg = (await res.json()) as ConfigPatch;
       cfg = merge(cfg, fileCfg);
     }
   } catch {

@@ -5,7 +5,7 @@
 // EventSource auto-reconnects and would kick off another run.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { LoopEvent, RunStats } from "../lib/types";
+import type { LoopEvent, RobotTarget, RunStats } from "../lib/types";
 import { runStreamUrl } from "../lib/api";
 
 export type RunStatus = "idle" | "running" | "done" | "error";
@@ -16,7 +16,10 @@ export interface RunStreamState {
   stats: RunStats | null;
   latest: LoopEvent | null;
   error: string | null;
-  start: (dryRun: boolean, delaySeconds: number) => void;
+  // Robot the server actually drove this run (from the SSE "start" event) — may
+  // differ from the requested toggle if ROBOT_TARGET was forced server-side.
+  activeTarget: string | null;
+  start: (dryRun: boolean, delaySeconds: number, target?: RobotTarget) => void;
   stop: () => void;
   reset: () => void;
 }
@@ -26,6 +29,7 @@ export function useRunStream(): RunStreamState {
   const [events, setEvents] = useState<LoopEvent[]>([]);
   const [stats, setStats] = useState<RunStats | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeTarget, setActiveTarget] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
   const closeSource = useCallback(() => {
@@ -43,20 +47,29 @@ export function useRunStream(): RunStreamState {
     setEvents([]);
     setStats(null);
     setError(null);
+    setActiveTarget(null);
     setStatus("idle");
   }, [closeSource]);
 
   const start = useCallback(
-    (dryRun: boolean, delaySeconds: number) => {
+    (dryRun: boolean, delaySeconds: number, target?: RobotTarget) => {
       closeSource();
       setEvents([]);
       setStats(null);
       setError(null);
+      setActiveTarget(null);
       setStatus("running");
 
-      const es = new EventSource(runStreamUrl(dryRun, delaySeconds));
+      const es = new EventSource(runStreamUrl(dryRun, delaySeconds, target));
       esRef.current = es;
 
+      es.addEventListener("start", (e) => {
+        try {
+          setActiveTarget((JSON.parse((e as MessageEvent).data) as { target?: string }).target ?? null);
+        } catch {
+          /* ignore malformed start frame */
+        }
+      });
       es.addEventListener("event", (e) => {
         const ev = JSON.parse((e as MessageEvent).data) as LoopEvent;
         setEvents((prev) => [...prev, ev]);
@@ -101,5 +114,5 @@ export function useRunStream(): RunStreamState {
   useEffect(() => () => closeSource(), [closeSource]);
 
   const latest = events.length ? events[events.length - 1] : null;
-  return { status, events, stats, latest, error, start, stop, reset };
+  return { status, events, stats, latest, error, activeTarget, start, stop, reset };
 }
