@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from .auth import require_token
 from .backend import make_backend
 from .config import Settings
-from .imaging import encode_depth_mm_b64, encode_rgb_b64
+from .imaging import encode_depth_mm_b64, encode_rgb_b64, white_balance_grayworld
 from .schemas import SceneCaptureResponse, SceneHealth
 
 settings = Settings()
@@ -44,9 +44,13 @@ def health() -> SceneHealth:
 def capture() -> SceneCaptureResponse:
     t0 = time.perf_counter()
     cap = backend.capture()
-    h, w = cap.rgb.shape[:2]
+    rgb = cap.rgb
+    # Neutralise the Zivid RGB's green cast so it matches the training domain.
+    if settings.white_balance == "grayworld" and backend.name == "zivid":
+        rgb = white_balance_grayworld(rgb)
+    h, w = rgb.shape[:2]
     return SceneCaptureResponse(
-        rgb_b64=encode_rgb_b64(cap.rgb),
+        rgb_b64=encode_rgb_b64(rgb),
         depth_b64=(
             encode_depth_mm_b64(cap.depth_mm, max_mm=settings.depth_max_mm)
             if cap.depth_mm is not None

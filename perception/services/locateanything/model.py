@@ -82,6 +82,7 @@ class LocateAnythingBackend(BasePerceptionModel):
                 tokenizer=self._tokenizer,
                 max_new_tokens=2048,
                 generation_mode="hybrid",
+                use_cache=True,  # LocateAnything's custom generate asserts this
             )
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         answer = response[0] if isinstance(response, tuple) else response

@@ -34,6 +34,10 @@ class Settings:
     # Clamp for the 16-bit depth PNG (mm). Anything beyond becomes max.
     depth_max_mm: int = field(default_factory=lambda: int(os.getenv("SCENE_DEPTH_MAX_MM", "65535")))
 
+    # Gray-world white balance on the Zivid RGB to neutralise its green colour
+    # cast before encoding. "grayworld" (default) | "off".
+    white_balance: str = field(default_factory=lambda: os.getenv("SCENE_WHITE_BALANCE", "grayworld"))
+
     # file backend inputs (dev only).
     rgb_path: str = field(default_factory=lambda: os.getenv("SCENE_RGB_PATH", ""))
     depth_path: str = field(default_factory=lambda: os.getenv("SCENE_DEPTH_PATH", ""))

@@ -119,13 +119,15 @@ async function postInfer<T>(key: ServiceKey, body: Record<string, unknown>): Pro
   return res.json();
 }
 
+// Low default conf: the parts models are trained on synthetic renders and score
+// low on real Zivid frames (sim-to-real gap), so 0.25 hid almost everything.
 export function runYolo(imageB64: string, opts: { conf?: number } = {}): Promise<YoloResponse> {
-  return postInfer("yolo", { image_b64: imageB64, conf: opts.conf ?? 0.25 });
+  return postInfer("yolo", { image_b64: imageB64, conf: opts.conf ?? 0.1 });
 }
 
 /** YOLO-Seg: trained parts instance segmentation (boxes + masks, closed-vocab). */
 export function runYoloSeg(imageB64: string, opts: { conf?: number } = {}): Promise<YoloSegResponse> {
-  return postInfer("yoloseg", { image_b64: imageB64, conf: opts.conf ?? 0.25 });
+  return postInfer("yoloseg", { image_b64: imageB64, conf: opts.conf ?? 0.1 });
 }
 
 /** SAM3 text-prompted segmentation (open-vocab). */
