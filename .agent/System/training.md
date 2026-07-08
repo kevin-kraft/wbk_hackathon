@@ -6,6 +6,7 @@
 - [SOP: deploying perception to the GPU server](../SOP/deploy_perception_gpu_server.md) — the container the trained weights get deployed into
 - [ADR 0012: mask-derived detection labels over bbox_2d](../Decisions/0012-mask-derived-detection-labels.md) — why `--task detmask` replaced `--task det`
 - [ADR 0013: AMP disabled on the Blackwell training stack](../Decisions/0013-amp-disabled-blackwell-training.md)
+- [ADR 0015: YOLO-Seg sidecar container, no rebuild](../Decisions/0015-yoloseg-sidecar-container-no-rebuild.md) — why `parts_seg_v1` deploys to a new `wbk-yoloseg` container instead of a `wbk-perception` rebuild
 - `training/README.md` (repo) — the canonical step-by-step runbook (setup → convert → train → deploy commands); this doc covers the *why* and *how it's built*, not a copy of those commands
 - Root [`README.md`](../../README.md) "Deployment" §2/§3 — the same pipeline summarized in the hackathon-wide deployment topology
 
@@ -159,6 +160,50 @@ Verification beyond the script: `YOLO(weights).names` should list all 18 part
 classes. See [SOP: deploying perception to the GPU server](../SOP/deploy_perception_gpu_server.md)
 for the wider container/tunnel picture this script assumes is already in place.
 
+## Deployment: `deploy_yolo_seg.sh` (added 2026-07-08)
+
+Serves `parts_seg_v1` through a new `yoloseg` perception service
+(`perception/services/yoloseg/`, port 8007) — see [System:
+Architecture](./architecture.md) Stage 1 Perception for the service itself.
+Unlike `deploy_yolo_weights.sh` above, this **doesn't** recreate
+`wbk-perception` — that image's baked-in `perception/` source predates the
+`yoloseg` service dir entirely, and rebuilding it was judged riskier than
+necessary for one new endpoint (see
+[ADR 0015](../Decisions/0015-yoloseg-sidecar-container-no-rebuild.md) for
+the full rationale). Instead:
+
+```bash
+# from the laptop: sync current perception/ source (yoloseg didn't exist in
+# the image this container is based on)
+rsync -a --delete perception/ gpu-server:/mnt/vss-data/kip/perception/
+# on the server:
+ssh gpu-server 'bash /mnt/vss-data/kip/code/deploy_yolo_seg.sh'
+```
+
+`training/deploy_yolo_seg.sh`:
+1. Checks `/mnt/vss-data/kip/perception/services/yoloseg/main.py` exists —
+   aborts with an rsync hint if the source sync (step above) was skipped.
+2. Copies `runs/parts_seg_v1/weights/best.pt` →
+   `/mnt/vss-data/kip/weights/parts_seg.pt`.
+3. `docker rm -f wbk-yoloseg` + `docker run` a **new sidecar container**
+   from the existing `wbk-perception:blackwell` image (`--gpus
+   device=1`, co-located with `wbk-perception`), with
+   `-v /mnt/vss-data/kip/perception:/app/perception` (the current source),
+   `-v /mnt/vss-data/kip/weights:/weights -e
+   YOLO_SEG_WEIGHTS=/weights/parts_seg.pt`, bound to `127.0.0.1:6770:8007`,
+   and the command overridden to `uvicorn services.yoloseg.main:app --host
+   0.0.0.0 --port 8007` (not the image's default `supervisord` entrypoint —
+   this container runs only `yoloseg`).
+4. Polls `GET :6770/health` until the model reports loaded.
+
+See [SOP: deploying perception to the GPU server](../SOP/deploy_perception_gpu_server.md)
+for the full container/tunnel topology (`wbk-yoloseg` joins `wbk-perception`
+and `wbk-sam3` as a third container) and the host-port map (`18007→6770`).
+Verified against a real dataset frame: 8 masks at 0.96–0.99 confidence with
+valid full-res PNG masks (`retina_masks=True` on the Ultralytics
+`.predict()` call — see [System: Architecture](./architecture.md) Stage 1
+Perception).
+
 `tensorboard.sh` runs TensorBoard over `/mnt/vss-data/kip/runs` (all runs'
 event files) bound to `127.0.0.1:6772` on the server — reachable locally at
 `http://localhost:6006` via the `gpu-server` SSH tunnel's `6006→6772`
@@ -170,9 +215,14 @@ LocalForward (see the deploy SOP).
 |---|---|---|---|---|---|
 | `parts_det_v1` (retired) | detection, `--task det` (bbox_2d, sparse) | 7,845 boxes | ~0.64 | — | 0.56 |
 | `parts_detmask_v1` (**deployed**) | detection, `--task detmask` (instance masks, dense) | 20,403 boxes | 0.99 | — | 0.99 |
-| `parts_seg_v1` | segmentation, `--task seg` | (same instance source) | 0.984 | 0.966 | — |
+| `parts_seg_v1` (**deployed**) | segmentation, `--task seg` | (same instance source) | 0.984 | 0.966 | — |
 
 `parts_detmask_v1/weights/best.pt` is the model currently deployed to
 `wbk-perception`'s `yolo` service (`YOLO_WEIGHTS=/weights/parts_detmask.pt`).
 See [ADR 0012](../Decisions/0012-mask-derived-detection-labels.md) for why
-`detmask` replaced `det` for detection training.
+`detmask` replaced `det` for detection training. `parts_seg_v1/weights/best.pt`
+is deployed (2026-07-08) to the standalone `wbk-yoloseg` sidecar's `yoloseg`
+service (`YOLO_SEG_WEIGHTS=/weights/parts_seg.pt`) — see "Deployment:
+`deploy_yolo_seg.sh`" above and
+[ADR 0015](../Decisions/0015-yoloseg-sidecar-container-no-rebuild.md) for
+why that's a separate container rather than a `wbk-perception` mount.

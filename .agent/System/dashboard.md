@@ -8,6 +8,7 @@
 - [ADR 0009: shared-token auth](../Decisions/0009-shared-token-auth.md) — the `apiToken` field below, and why `GET /events/run` needed a query-param token transport
 - [ADR 0011: LLM action selector, constrained vocabulary](../Decisions/0011-llm-action-selector-constrained-vocabulary.md) — the `GUARDRAIL` event `PlanProgress`/the event log surface
 - [ADR 0014: robot target selection (real \| sim \| both)](../Decisions/0014-robot-target-real-sim-both.md) — the Real/Sim/Both toggle this doc's "Sim / digital-twin UI" section covers
+- [ADR 0015: YOLO-Seg sidecar container, no rebuild](../Decisions/0015-yoloseg-sidecar-container-no-rebuild.md) — the deployment behind the `yoloseg` service this doc's Perception page section calls
 - `contracts/simulation_api.md` / `contracts/sim_scene_capture.md` — the Isaac Sim command-bus + (draft, unimplemented) scene-capture surfaces the sim-side UI calls
 - `frontend/README.md` (in-repo) — the module's own README; this doc adds the `.agent/` cross-reference layer on top, not a duplicate
 
@@ -37,7 +38,7 @@ and is verified clean.
 | Page | File | What it shows |
 |---|---|---|
 | Dashboard | `DashboardPage.tsx` | Run controls (start/stop, dry-run toggle, pace/delay, the Real/Sim/Both robot-target toggle, `ProductSelector` — see "Plan mode UI" below), the 7-stage pipeline tracker (`StageTracker`) driven by the *latest* live event, `PlanProgress` (plan-driven runs only), scene camera (real `MjpegView` or, in Sim source mode, a rendered preview — see "Sim / digital-twin UI" below), grip telemetry, a next-part text prompt box, bin tallies, and the full event log. |
-| Perception | `PerceptionPage.tsx` | **Rewritten 2026-07-08** — no longer a stub: capture a scene (real Zivid or sim render, via `SourceToggle`), pick a target part (`PartSelector`) or a custom prompt, run YOLO / SAM 3 / LocateAnything inference, and see the result rendered as box/mask/point overlays on the captured frame (`SceneView`) — see "Sim / digital-twin UI" below. Detection overlays are no longer future work. |
+| Perception | `PerceptionPage.tsx` | **Rewritten 2026-07-08** — no longer a stub: capture a scene (real Zivid or sim render, via `SourceToggle`) or **upload a local image** (debug aid, added 2026-07-08 — see "YOLO-Seg + manual image upload" below), pick a target part (`PartSelector`) or a custom prompt, run YOLO-Det / YOLO-Seg / SAM 3 / LocateAnything inference, and see the result rendered as box/mask/point overlays on the captured frame (`SceneView`) — see "Sim / digital-twin UI" and "YOLO-Seg + manual image upload" below. Detection overlays are no longer future work. |
 | Inspection | `InspectionPage.tsx` | Inspection camera, the damage-VLM endpoint, a per-part OK/damaged verdicts table, and bin state. |
 | Settings | `SettingsPage.tsx` | Live-editable text fields for every service endpoint (now including the simulator's `movementSim`/`gripSim` and the Zivid `sceneCapture` service) and both camera stream URLs, plus run defaults (dry-run, pace, and — added 2026-07-08 — the default robot target) and the shared `apiToken` (see "Auth token" below); "Save & reload" persists to `localStorage`, "Reset to config.json" clears the override. |
 
@@ -141,6 +142,56 @@ operator drive/inspect the Isaac Sim digital twin from the browser:
 - **No new frontend test coverage.** `SceneView`, `SourceToggle`,
   `PartSelector`, and the rewritten `PerceptionPage.tsx` capture/inference
   flow have no Vitest tests as of this capture — see "Test suite" below.
+
+## YOLO-Seg + manual image upload (added 2026-07-08)
+
+Two independent additions to the Perception page, shipped together
+(commit `27fee6c`):
+
+- **`yoloseg` wired in as a fourth model choice**, and the two trained-parts
+  models relabeled to disambiguate them from the open-vocab pair:
+  `MODELS` (`PerceptionPage.tsx`) now lists `YOLO-Det` (was plain `YOLO` —
+  the trained `parts_detmask` detector), `YOLO-Seg` (new — `parts_seg_v1`,
+  **the default selected model** as of this change, was `sam3`), `SAM 3`,
+  `LocateAnything`. The stale copy "YOLO uses its fixed COCO-80
+  vocabulary — it won't recognise the disassembly parts" (accurate when
+  `yolo` served stock weights, false since the detector was trained — see
+  [ADR 0012](../Decisions/0012-mask-derived-detection-labels.md)) is
+  **removed**; both YOLO variants now show a one-line description of the
+  trained model instead. `runYoloSeg()` (`lib/api.ts`) posts to
+  `{yoloseg}/infer` via the same `postInfer()` helper every other model
+  uses. `YoloSegResponse`/`YoloSegInstance` (`lib/types.ts`) mirror the
+  backend's `SegInstance` shape (`box`, `mask_b64_png`, `score`, `class_id`,
+  `label`). YOLO-Seg results render through the same `SceneView`
+  boxes/masks overlay `sam3` uses (`hasMasks = model === "sam3" || model ===
+  "yoloseg"` now gates the masks/boxes toggle, previously `sam3`-only).
+  `yoloseg` was added to the `ServiceKey` union, `SERVICE_KEYS`
+  (`config/runtime.ts`), the `localhostDefaults()`/`envDefaults()` maps
+  (`VITE_YOLOSEG_URL`, default `http://localhost:8007`),
+  `ServiceHealthStrip`'s short-label map (`yolo` relabeled `yolo·det`,
+  `yoloseg` added as `yolo·seg`), and `SettingsPage`'s label map (`YOLO-Det
+  (parts)` / `YOLO-Seg (parts)`) — the same four-layer config precedence and
+  health-check pattern as every other service (see "Runtime endpoint
+  config" below). `deploy-local/config.json` (gitignored, machine-local —
+  see [SOP: deploying perception to the GPU
+  server](../SOP/deploy_perception_gpu_server.md)) points `yoloseg` at
+  `http://127.0.0.1:18007`, the local end of the SSH tunnel to the
+  GPU-server's `wbk-yoloseg` sidecar (see
+  [ADR 0015](../Decisions/0015-yoloseg-sidecar-container-no-rebuild.md)).
+- **Manual image upload** (`uploadImage()`, a new file-input button next to
+  *Capture Zivid view*) — reads a locally chosen image via `FileReader`,
+  strips the `data:...;base64,` prefix, and calls `setScene({rgb_b64: b64,
+  backend: "upload"})` directly, bypassing `captureScene()` entirely. This
+  is a **debug aid**: it lets inference be exercised against an arbitrary
+  image (e.g. a real dataset frame) with no sim/Zivid/camera running at
+  all, and works identically for all four models. `SceneCapture.backend`
+  (a plain `string` field, not a closed union) is set to `"upload"` to
+  record the provenance alongside whatever `"real"`/`"sim"` values
+  `captureScene()` sets; the uploaded filename is shown next to the button
+  and cleared on the next real/sim capture.
+- **No new frontend test coverage** for either addition (`runYoloSeg`,
+  `uploadImage`, the relabeled `MODELS`/`ServiceKey` wiring) — see "Test
+  suite" below; `npm run build` (type-check) does cover the new types.
 
 ## Runtime endpoint config — the flexible bit (`frontend/src/config/runtime.ts`)
 
@@ -313,7 +364,10 @@ Still **30 tests** as of 2026-07-08 — the sim/digital-twin UI added that day
 (`SceneView`, `SourceToggle`, `PartSelector`, the rewritten `PerceptionPage.tsx`
 capture/inference flow, `captureScene`/`generateScenePreview`/`runYolo`/
 `runSam3`/`runLocate` in `lib/api.ts`) shipped with no new Vitest coverage —
-a gap, not a claim of coverage. `npm run build` (type-check) does cover it,
+a gap, not a claim of coverage. The same-day `yoloseg`/manual-image-upload
+follow-up (`runYoloSeg`, `uploadImage`, the `MODELS`/`ServiceKey` relabeling —
+see "YOLO-Seg + manual image upload" above) is the same story: no new
+Vitest cases, still 30. `npm run build` (type-check) does cover it,
 since `SceneView`'s prop types and `lib/types.ts`'s new shapes
 (`SourceMode`, `RobotTarget`, `ConfigPatch`, the perception result types)
 must still typecheck.

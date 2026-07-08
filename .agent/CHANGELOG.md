@@ -2,6 +2,146 @@
 
 Newest first.
 
+- 2026-07-08 — GigaPose gains a CAD-free 2D (planar) pose mode (commit
+  `79f9ffa`, deploy script `f2a5da8`), and a mask-encoding bug that was
+  blanking YOLO-Seg masks got fixed (commit `4b6d1d3`). **2D pose mode:**
+  new `pipeline="2d"` on GigaPose's `POST /pose`
+  (`pose/gigapose_svc/app.py`) — CAD-free, model-free: back-projects the
+  mask centroid to a 3D point (depth priority: per-mask median depth →
+  caller `plane_z` → built-in default; `stage` in `{2d, 2d-plane,
+  2d-defaultz}`) and builds a top-down grasp orientation whose in-plane yaw
+  follows the mask's PCA principal axis, in new module
+  `pose/shared/planar.py` (`planar_pose()`, numpy-only). Returns the same
+  `T_cam_obj` contract (ADR 0004) — a drop-in for the orchestrator/frontend.
+  `pose/shared/schemas.py`'s `PoseRequest.pipeline` gains `'2d'` plus an
+  optional `plane_z` field. Inspired by the KIP seminar's `detect_and_move`
+  (centroid+depth→world point, fixed top-down), enriched with in-plane
+  orientation. Startup now degrades gracefully: `gigapose_svc/app.py`'s
+  lifespan wraps `GigaPoseRunner.load()` in try/except, so a missing/failed
+  6DoF model no longer blocks startup — the service just serves
+  `pipeline='2d'`, and a `'rgb'`/`'rgbd'` request then 503s with an explicit
+  message. This matters because the deployed `wbk-gigapose` has **no CAD
+  templates for this project's parts** (`GET /health`'s `classes: []`), so
+  6DoF pose can't run against real parts today — 2D mode is the only
+  currently-working real-part pose path. Verified end-to-end against real
+  YOLO-Seg masks: 3 poses in 55ms, distinct per-part yaw, `stage=2d-plane`.
+  Note: the orchestrator does **not** yet call `pipeline='2d'` —
+  `HttpPose.estimate()` never sets `pipeline` (defaults to `'rgbd'`) and
+  `pose_url` defaults to FoundationPose, not GigaPose — wiring the loop to
+  use 2D mode is follow-up work, flagged in `System/architecture.md`'s "Not
+  yet built". Added `Decisions/0016-gigapose-2d-planar-pose-mode.md` (ADR:
+  why a CAD-free/model-free mode, the seminar inspiration, the
+  graceful-degrade design, rejected alternatives — blocking on CAD/template
+  production, a parallel response schema, hard-fail startup). **Deployment
+  reality captured for the first time:** the pose services
+  (`wbk-gigapose`, `wbk-foundationpose`) run on **podman, not docker**, on
+  the same shared GPU server as perception — invisible to `docker ps`,
+  root-managed under a custom store
+  (`sudo podman --root /mnt/vss-data/kip/podman/storage --runroot
+  /run/containers/storage`). The `wbk-gigapose` image bakes pose code at
+  `/svc`; only the GigaPose repo is bind-mounted. Deployed via new
+  `training/deploy_gigapose_2d.sh`: `podman cp` the three changed files into
+  `/svc` + `podman restart` (preserves the container's existing GPU/mount/env
+  config; durable across restart, lost on `podman rm`). Also newly
+  documented: the deployed pose services **require** `WBK_API_TOKEN`
+  (unlike perception, where it's currently unset) — a footgun for anyone
+  assuming one auth posture across the whole GPU server. Added new SOP
+  `SOP/deploy_pose_podman.md` covering all of the above (topology, auth,
+  the `classes: []` reality, the `podman cp`+restart deploy pattern and its
+  durability caveat, reaching pose from a local orchestrator). **Mask fix:**
+  `perception/services/shared/imaging.py`'s `encode_mask_png_b64` skipped
+  its 0/255 binarization for any already-`uint8` input, but Ultralytics
+  `result.masks.data` is a uint8 `{0,1}` tensor — so YOLO-Seg masks went out
+  at `{0,1}`, and every consumer's `> 127` threshold read them as **empty**:
+  the dashboard's YOLO-Seg overlay rendered blank, and `gigapose
+  pipeline='2d'` raised "empty mask" against real masks (this is what
+  surfaced the bug, while wiring 2D mode against real YOLO-Seg output).
+  Fixed to always binarize (`(mask > 0) * 255`, idempotent for already-0/255
+  inputs); redeployed `wbk-yoloseg`. Note: `sam3` uses the same encoder from
+  a separate image (`wbk-sam3`) and only picks up the fix on its next
+  rebuild/redeploy. Extended `System/architecture.md`: Stage 2 Pose section
+  rewritten with a new "GigaPose `pipeline='2d'`" subsection (mode
+  description, the no-CAD-templates reality, the graceful-degrade startup
+  change, the not-yet-wired orchestrator gap), a new mask-encoding gotcha
+  paragraph under Stage 1's `yoloseg` description, a new "Not yet built"
+  bullet for the orchestrator↔2D-mode wiring gap, Related Docs gained ADR
+  0016 and the new SOP. Extended `System/integration_points.md`: Contract 2
+  gained the `plane_z` field and a `pipeline='2d'` paragraph, Contract 1
+  gained the mask-encoding gotcha paragraph (general — applies to any
+  mask-producing service, not just `yoloseg`), Related Docs gained ADR 0016
+  and the new SOP. Extended `SOP/running_services.md`: Related Docs gained
+  the new SOP and ADR 0016, and fixed a stale "in progress, not yet running"
+  claim about the (already-deployed) perception GPU-server SOP left over
+  from an earlier pass. Added ADR 0016 and the new SOP to `README.md`'s
+  indices; updated the `System/architecture.md`/`System/integration_points.md`
+  one-liners.
+- 2026-07-08 — New `yoloseg` perception service documented (commit `27fee6c`,
+  "Add YOLO-Seg service + manual image upload; wire trained parts models
+  into dashboard"). `perception/services/yoloseg/` (`model.py`/`main.py`)
+  serves the trained `parts_seg_v1` instance-segmentation model — boxes +
+  per-instance masks + part labels in one pass, closed-vocab over the same
+  18 disassembly-part classes as the `yolo` detector, via Ultralytics
+  `predict(..., retina_masks=True)` for full-res masks. New
+  `YoloSegRequest`/`SegInstance`/`YoloSegResponse` schemas and
+  `yolo_seg_weights`/`YOLO_SEG_WEIGHTS` config
+  (`perception/services/shared/{schemas,config}.py`); registered as a
+  fourth `supervisord` program (port 8007) and in `docker-compose.yml`
+  locally. On the GPU server, deployed instead as a **third sidecar
+  container**, `wbk-yoloseg` (host port `6770`, `--gpus device=1`,
+  `training/deploy_yolo_seg.sh`) — because the already-running
+  `wbk-perception:blackwell` image predates the `yoloseg` service dir, the
+  script runs it from that same image with the current `perception/`
+  source bind-mounted over `/app/perception` (rsync'd from the laptop
+  first) instead of rebuilding. Added
+  `Decisions/0015-yoloseg-sidecar-container-no-rebuild.md` (ADR: mounted-source
+  sidecar over image rebuild, why, and the consequence that
+  `wbk-perception`'s own baked-in source is now stale relative to the repo
+  — harmless, since only `wbk-yoloseg` needs the new code). Documented an
+  **important host-port gotcha** explicitly: on the GPU server, this
+  project's perception ports are `6767`/`6768`/`6769`/`6770`
+  (yolo/sam3/locate/yoloseg) — host port `8001` belongs to a different
+  team's service, not this project's `yolo`; container-internal ports
+  `8001`/`8002`/`8003`/`8007` never appear on the host's port space. SSH
+  tunnel extended with `18007→6770`. Also noted: `yoloseg` is **not**
+  consumed by the orchestrator (`docker-compose.remote-gpu.yml` has no
+  `PERCEPTION_YOLOSEG_URL`) — it's dashboard-only, for manual inspection on
+  the Perception page. Frontend: `yolo` relabeled `YOLO-Det` and the stale
+  "COCO-80 won't recognise parts" copy removed (the detector has served
+  trained `parts_detmask` weights since `training/`'s YOLO pass); new
+  `YOLO-Seg` model option added and made the **default** selected model on
+  the Perception page (was `sam3`); `yoloseg` wired through `ServiceKey`
+  (`lib/types.ts`), `SERVICE_KEYS`/`localhostDefaults()`/`envDefaults()`
+  (`config/runtime.ts`, new `VITE_YOLOSEG_URL`), `runYoloSeg()` (`lib/api.ts`),
+  `ServiceHealthStrip` (`yolo·det`/`yolo·seg` short labels), `SettingsPage`
+  labels, and the gitignored `deploy-local/config.json` (points `yoloseg`
+  at `http://127.0.0.1:18007`, the local tunnel end). Also shipped in the
+  same commit: a **manual image upload** debug aid on the Perception page
+  (`uploadImage()` — `FileReader` → base64 straight into scene state,
+  `SceneCapture.backend="upload"`) so detection/segmentation can be
+  exercised against an arbitrary local image with no sim/Zivid/camera
+  running; works with all four perception models. Verified end-to-end
+  against a real dataset frame: YOLO-Det 7 boxes @0.99-1.0, YOLO-Seg 8
+  masks @0.96-0.99 with valid full-res PNG masks. **No new frontend test
+  coverage** for either addition — Vitest suite stays at 30 tests; `npm run
+  build` passes. Extended `System/architecture.md`: Stage 1 Perception
+  section gained the `yoloseg` service row/description and a link to ADR
+  0015; Related Docs gained the new ADR. Extended `System/training.md`:
+  new "Deployment: `deploy_yolo_seg.sh`" section (mirrors the existing
+  `deploy_yolo_weights.sh` section), results table's `parts_seg_v1` row
+  marked **deployed**, Related Docs gained ADR 0015. Rewrote
+  `SOP/deploy_perception_gpu_server.md`'s container topology (two → three
+  containers), added the host-port gotcha paragraph, the "not consumed by
+  the orchestrator" note, the tunnel port-map update, and a condensed
+  "Deploying the trained YOLO-Seg model" section pointing to
+  `System/training.md` for the full script breakdown (same
+  SOP-condenses/System-details pattern as the existing YOLO-weights
+  section). Extended `System/dashboard.md`: new "YOLO-Seg + manual image
+  upload" section, Perception page row rewrite, Related Docs gained ADR
+  0015, Test suite section's "no new coverage" note extended to cover this
+  same-day follow-up commit. Added ADR 0015 to `README.md`'s Decisions
+  index; updated the `System/dashboard.md`, `System/training.md`, and
+  `SOP/deploy_perception_gpu_server.md` one-liners (three containers, the
+  host-port gotcha, the YOLO-Seg deploy script).
 - 2026-07-08 — Robot target selection (`real|sim|both`) and the Isaac Sim
   digital-twin integration documented (working tree at capture time, not yet
   committed; developed concurrently with, and touching some of the same

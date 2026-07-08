@@ -4,7 +4,7 @@
 - [System: Orchestrator](./orchestrator.md) — the state machine that ties every stage below together, the Protocol/client seam, loop states, the `/events/run` SSE endpoint
 - [System: Dashboard](./dashboard.md) — the operator console / live demo UI that streams from the orchestrator
 - [System: Robot Control](./robot_control.md) — the movement stage: Group 2's Jetson bridge to the LARA5 robot
-- [System: Training](./training.md) — the custom YOLOv26 detection/segmentation training pipeline that feeds Stage 1 Perception's `yolo` service
+- [System: Training](./training.md) — the custom YOLOv26 detection/segmentation training pipeline that feeds Stage 1 Perception's `yolo` and `yoloseg` services
 - [Integration Points & Wire Contracts](./integration_points.md) — the base64-in-JSON contracts, model-adapter pattern, HF cache mount, the SSE contract
 - [ADR: perception shared container vs. pose split containers](../Decisions/0001-perception-shared-container-pose-split-containers.md)
 - [ADR: perception model stack](../Decisions/0002-perception-model-stack.md)
@@ -15,6 +15,7 @@
 - [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — the optional `WBK_API_TOKEN` gate on every work endpoint
 - [ADR: robot_control integration](../Decisions/0010-robot-control-integration.md) — merging in Group 2's Jetson bridge as the movement stage, and the still-open orchestrator adapter gap
 - [ADR: LLM action selector, constrained vocabulary](../Decisions/0011-llm-action-selector-constrained-vocabulary.md) — the guardrail on the plan-driven loop's optional LLM command synthesis
+- [ADR 0015: YOLO-Seg sidecar container, no rebuild](../Decisions/0015-yoloseg-sidecar-container-no-rebuild.md) — why the new `yoloseg` service deploys as a second container on the GPU server instead of a `wbk-perception` image rebuild
 - [SOP: running the services](../SOP/running_services.md)
 - [SOP: running the tests](../SOP/running_tests.md)
 - [SOP: running the orchestrator dry-run](../SOP/running_orchestrator_dry_run.md)
@@ -22,6 +23,8 @@
 - [ADR 0012: mask-derived detection labels](../Decisions/0012-mask-derived-detection-labels.md) — why YOLO detection training uses `--task detmask` instead of the `bbox_2d` annotator
 - [ADR 0013: AMP disabled on the Blackwell training stack](../Decisions/0013-amp-disabled-blackwell-training.md)
 - [ADR 0014: robot target selection (real \| sim \| both)](../Decisions/0014-robot-target-real-sim-both.md) — driving the Isaac Sim digital twin instead of/alongside the real arm, and why sim is a mirror, not a peer
+- [ADR 0016: GigaPose 2D (planar) pose mode](../Decisions/0016-gigapose-2d-planar-pose-mode.md) — CAD-free, model-free pose from a mask, why it exists, and the graceful-degrade startup change
+- [SOP: deploying the pose services (podman)](../SOP/deploy_pose_podman.md) — the `wbk-gigapose`/`wbk-foundationpose` podman deployment (distinct from perception's docker deployment), required auth, and the no-CAD-templates reality
 - `contracts/simulation_api.md` / `contracts/sim_scene_capture.md` — the Isaac Sim command-bus surface, and the (draft, unimplemented) sim scene-capture contract
 
 ## What this is
@@ -156,11 +159,52 @@ for the training pipeline itself, and
 [ADR 0013](../Decisions/0013-amp-disabled-blackwell-training.md) for the two
 training decisions behind that result.
 
+A fourth perception service, **`yoloseg`** (added 2026-07-08, commit
+`27fee6c`), serves the trained `parts_seg_v1` instance-segmentation model —
+boxes, per-instance masks, and part labels in one pass, closed-vocabulary
+over the same 18 classes. It's the closed-vocab counterpart to `yolo`
+(detection-only): both are trained-parts models with no prompt, unlike
+`sam3`/`locateanything`'s open-vocab text prompting.
+
 | Service | Port | Job | Backend | Module |
 |---|---|---|---|---|
-| `yolo` | 8001 | object detection | Ultralytics YOLO (`YOLO_WEIGHTS`, default `yolo11n.pt`) | `perception/services/yolo/model.py` |
+| `yolo` | 8001 | object detection (closed-vocab, trained parts model) | Ultralytics YOLO (`YOLO_WEIGHTS`, default `yolo11n.pt`, deployed: `parts_detmask.pt`) | `perception/services/yolo/model.py` |
+| `yoloseg` | 8007 | instance segmentation — boxes + per-instance masks + labels (closed-vocab, trained parts model) | Ultralytics YOLO-seg (`YOLO_SEG_WEIGHTS`, default `yolo11n-seg.pt`, deployed: `parts_seg.pt`), `predict(..., retina_masks=True)` for full-res masks | `perception/services/yoloseg/model.py` |
 | `sam3` | 8002 | promptable segmentation (point/box + text/concept) | Meta SAM 3, `facebook/sam3` via `transformers` (gated weights) | `perception/services/sam3/model.py` |
 | `locateanything` | 8003 | text-prompted localization/pointing | NVIDIA `LocateAnything-3B` via `trust_remote_code` | `perception/services/locateanything/model.py` |
+
+`yoloseg`'s wire contract (`YoloSegRequest`/`SegInstance`/`YoloSegResponse` in
+`perception/services/shared/schemas.py`) mirrors `yolo`'s shape plus a mask:
+each `SegInstance` carries a `box` (`BBox`), a single-channel PNG mask
+(`mask_b64_png`, via the existing `encode_mask_png_b64` helper — same
+encoding `sam3` uses), `score`, `class_id`, and `label`. `retina_masks=True`
+on the Ultralytics `.predict()` call is what makes the mask line up 1:1 with
+the original image resolution instead of the model's letterboxed input size
+— without it the frontend's `SceneView` overlay would need its own rescale
+step.
+
+**Gotcha, fixed 2026-07-08 (commit `4b6d1d3`):** the shared
+`encode_mask_png_b64` helper (`perception/services/shared/imaging.py`)
+skipped its 0/255 binarization step whenever the input array was already
+`dtype=uint8` — but Ultralytics `result.masks.data` yields a uint8 mask with
+values `{0,1}`, not `{0,255}`. Every mask consumer (the dashboard's overlay,
+`gigapose`'s `pipeline='2d'`) thresholds at `> 127`, so those 0/1 masks read
+as **entirely empty**: the YOLO-Seg overlay rendered blank, and 2D-mode pose
+requests raised "empty mask". The fix always binarizes
+(`(mask > 0).astype(uint8) * 255`, idempotent for already-0/255 inputs) — see
+[System: Integration Points](./integration_points.md) for the shared-helper
+detail. `sam3` uses the same encoder from a separate service image
+(`wbk-sam3`) and picks up the fix on its next rebuild/redeploy, not
+automatically.
+
+On the GPU-server deployment, `yoloseg` runs as its own sidecar container
+(`wbk-yoloseg`, host port `6770`) rather than inside `wbk-perception` —
+see [ADR 0015](../Decisions/0015-yoloseg-sidecar-container-no-rebuild.md)
+and [SOP: deploying perception to the GPU
+server](../SOP/deploy_perception_gpu_server.md) for why and the full port
+map. Locally (`docker-compose.yml`, single-host), it's a fourth
+`supervisord` program inside the one shared `perception` container, same as
+the other three — see [ADR 0001](../Decisions/0001-perception-shared-container-pose-split-containers.md).
 
 Shared code lives in `perception/services/shared/`:
 - `schemas.py` — request/response Pydantic models (`ImageInput`, `BBox`, `Point`,
@@ -202,12 +246,52 @@ native dependency stacks conflict (see ADR 0001).
 | Service | Port | Model | Depth | Extra output | Module |
 |---|---|---|---|---|---|
 | `foundationpose` | 8004 | FoundationPose | required (RGB-D) | — | `pose/foundationpose_svc/model.py` (`FoundationPoseRunner`) |
-| `gigapose` | 8005 | GigaPose | optional (`rgbd`/`rgb` pipeline) | `score`, `stage` | `pose/gigapose_svc/model.py` (`GigaPoseRunner`) |
+| `gigapose` | 8005 | GigaPose (`rgb`/`rgbd`) or CAD-free planar (`2d`) | optional (`rgbd` pipeline; `2d` uses it opportunistically) | `score`, `stage` | `pose/gigapose_svc/model.py` (`GigaPoseRunner`), `pose/shared/planar.py` (`planar_pose`, `2d` only) |
 
 Shared code lives in `pose/shared/`:
 - `schemas.py` — `PoseRequest`/`PoseInstance`/`ObjectPose`/`PoseResponse`/`PoseHealth`.
   Deliberately identical to the KIP `kip-pose-viewer` reference contract (ADR 0004).
 - `imaging.py` — rgb/depth/mask/K decode helpers.
+- `planar.py` (added 2026-07-08, commit `79f9ffa`) — the CAD-free `pipeline='2d'`
+  geometry: numpy-only, no model/templates. See "GigaPose `pipeline='2d'`" below.
+
+### GigaPose `pipeline='2d'` — CAD-free, model-free planar pose
+
+`gigapose`'s `POST /pose` gained a third `pipeline` value, `'2d'`, alongside
+the existing `'rgb'`/`'rgbd'` 6DoF pipelines (`pose/gigapose_svc/app.py`,
+`pose/shared/planar.py`, `pose/shared/schemas.py`). It back-projects each
+mask's centroid to a 3D point (depth priority: per-mask median depth from
+the depth image → caller-supplied `plane_z` (camera-frame table depth,
+metres) → a built-in `default_z=0.5`m; `stage` in `{2d, 2d-plane,
+2d-defaultz}` records which) and builds a top-down grasp orientation whose
+in-plane yaw follows the mask's principal axis (PCA on the mask pixels).
+Output is the **same** `T_cam_obj` contract the 6DoF pipelines return, so it
+is a drop-in for the orchestrator/frontend — see [ADR
+0016](../Decisions/0016-gigapose-2d-planar-pose-mode.md) for why this mode
+exists (inspired by the KIP seminar's `detect_and_move`) and its trade-offs.
+
+This matters today because **the deployed `wbk-gigapose` has no CAD
+templates for this project's parts** (`GET /health`'s `classes` field
+returns `[]`) — GigaPose's 6DoF pipelines need 162 pre-rendered templates
+per object on disk before they can pose anything real, and those templates
+don't exist for this project's parts yet. `pipeline='2d'` needs no
+templates/CAD mesh/model load at all, so **it is currently the only pose
+path that works against real parts** on the deployed instance; a
+`pipeline='rgb'`/`'rgbd'` request against it 503s with an explicit
+"6DoF model not loaded; use pipeline='2d'" message rather than the service
+failing to serve anything. `gigapose_svc/app.py`'s startup lifespan wraps
+`GigaPoseRunner.load()` in a try/except specifically so a missing/failed
+6DoF model degrades the service to 2D-only instead of blocking startup
+entirely. See [SOP: deploying the pose services
+(podman)](../SOP/deploy_pose_podman.md) for the deployed reality and
+[System: Integration Points](./integration_points.md) Contract 2 for the
+full request/response shape.
+
+The orchestrator does **not** yet call `pipeline='2d'` — `HttpPose` never
+sets a `pipeline` field, so it always gets `PoseRequest`'s default
+(`'rgbd'`), and `pose_url` defaults to FoundationPose, not GigaPose. Wiring
+the loop to use the 2D mode (the only currently-working real-part pose path
+on the deployed server) is follow-up work — see "Not yet built" below.
 
 Both services build on top of **pre-built GPU base images** (`foundationpose:blackwell`,
 `gigapose:blackwell`) that must be compiled from the model repos first — see
@@ -294,6 +378,17 @@ As of the orchestrator addition (`3abc923`, 2026-07-07):
   built-in table and `deploy/sim_named_poses.example.json` are rough
   placeholders, not measured teach points (see
   [System: Orchestrator](./orchestrator.md) "Robot target selection").
+- **Orchestrator wiring for GigaPose `pipeline='2d'`** — the CAD-free planar
+  pose mode (see "Stage 2 — 6DoF Pose" above and [ADR
+  0016](../Decisions/0016-gigapose-2d-planar-pose-mode.md)) exists and is
+  verified against real masks, but `HttpPose`/`OrchestratorConfig` don't call
+  it yet: `pose_url` defaults to FoundationPose and `HttpPose.estimate()`
+  never sets `pipeline`, so it always requests the default `'rgbd'`. Since
+  the deployed GigaPose has no CAD templates (`classes: []`), the loop
+  cannot currently get a real pose from either service against real parts —
+  wiring the loop to call GigaPose with `pipeline='2d'` is the follow-up
+  needed to close that gap. See [SOP: deploying the pose services
+  (podman)](../SOP/deploy_pose_podman.md).
 
 ## Test suite
 

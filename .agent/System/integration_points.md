@@ -7,6 +7,8 @@
 - [ADR: pose contract reuses kip-pose-viewer](../Decisions/0004-pose-contract-reuses-kip-pose-viewer.md)
 - [ADR: dashboard is a separate static app](../Decisions/0008-frontend-separate-static-app.md) — why SSE + CORS exist at all
 - [ADR: shared-token auth](../Decisions/0009-shared-token-auth.md) — why every `POST` contract below is gated, the threat model, and its limits
+- [ADR 0016: GigaPose 2D (planar) pose mode](../Decisions/0016-gigapose-2d-planar-pose-mode.md) — the `pipeline='2d'` addition to Contract 2
+- [SOP: deploying the pose services (podman)](../SOP/deploy_pose_podman.md) — required auth on the deployed pose services (stricter than perception's), the no-CAD-templates reality behind `pipeline='2d'`
 - [SOP: running the services](../SOP/running_services.md)
 
 This doc covers the things a change to *any* stage is likely to touch: the
@@ -66,6 +68,20 @@ planning, when it exists) does not need to branch on which model produced it.
 Every perception service also exposes `GET /health` → `HealthResponse{status,
 service, model, device, loaded}` and `GET /` (info) and `GET /docs` (OpenAPI).
 
+**Mask encoding gotcha, fixed 2026-07-08 (commit `4b6d1d3`):** every mask a
+service returns (`sam3`'s `MaskResult`, `yoloseg`'s `SegInstance`) is a
+single-channel PNG via the shared `encode_mask_png_b64`
+(`perception/services/shared/imaging.py`), and every consumer (frontend
+overlay, `gigapose`'s `pipeline='2d'`) thresholds it at `> 127`, assuming
+0/255. The helper used to skip its binarization step for any already-`uint8`
+input — but Ultralytics `result.masks.data` is uint8 valued `{0,1}`, so
+`yoloseg` masks went out at `{0,1}` and read back as **empty** everywhere.
+Fixed to always binarize (`(mask > 0) * 255`, idempotent for already-0/255
+inputs) — see [System: Architecture](./architecture.md) for the full
+incident writeup. If you add a new mask-producing service, use
+`encode_mask_png_b64` rather than a bespoke encoder, or you'll need to
+re-derive this fix independently.
+
 `POST /infer` requires `WBK_API_TOKEN` (`Authorization: Bearer <token>`) when
 that env var is set on the service — see [ADR 0009](../Decisions/0009-shared-token-auth.md).
 `GET /health`/`/`/`/docs` stay open regardless.
@@ -84,7 +100,11 @@ Request (`PoseRequest`):
   "instances": [{"id": 0, "class": "housing", "mask_b64": "<PNG 0/255>"}],
   "iterations": 5,
   // gigapose-only knobs (ignored by foundationpose):
-  "hypotheses": 5, "pipeline": "rgbd", "kabsch": true
+  "hypotheses": 5, "pipeline": "rgbd", "kabsch": true,
+  // gigapose pipeline='2d' only — camera-frame table depth (metres), used
+  // when a per-mask depth value is unavailable; omit to fall back further
+  // to a built-in default:
+  "plane_z": null
 }
 ```
 Response (`PoseResponse`): `{"poses": [{"id","class","T_cam_obj":[[4x4]],
@@ -92,8 +112,22 @@ Response (`PoseResponse`): `{"poses": [{"id","class","T_cam_obj":[[4x4]],
 
 `T_cam_obj` is always a 4x4 row-major object→camera transform, **OpenCV camera
 frame** (x right, y down, +z forward), in **metres**. `score` is populated by
-GigaPose only; `stage` (`'coarse'|'refined'|'refined+kabsch'`) is GigaPose-only
-too — FoundationPose leaves both `null`.
+GigaPose only; `stage` (`'coarse'|'refined'|'refined+kabsch'` for
+`rgb`/`rgbd`, or `'2d'|'2d-plane'|'2d-defaultz'` for `pipeline='2d'`) is
+GigaPose-only too — FoundationPose leaves both `null`.
+
+**`pipeline='2d'` (GigaPose only, added 2026-07-08)**: a CAD-free,
+model-free planar pose, added because the deployed `wbk-gigapose` has no CAD
+templates for this project's parts (`GET /health`'s `classes: []`) — see
+[System: Architecture](./architecture.md) "GigaPose `pipeline='2d'`" and
+[ADR 0016](../Decisions/0016-gigapose-2d-planar-pose-mode.md). It bypasses
+`GigaPoseRunner` entirely (`pose/shared/planar.py`'s `planar_pose()`,
+numpy-only) and returns the same `ObjectPose` shape — a client cannot tell
+from the response shape alone which pipeline produced a pose; check `stage`.
+A `pipeline='rgb'`/`'rgbd'` request against a GigaPose instance whose 6DoF
+model failed to load (or was never asset-ready) now gets a clear `503`
+instead of the service failing to start at all — see the same ADR for the
+graceful-degrade change in `gigapose_svc/app.py`'s startup lifespan.
 
 `GET /health` → `PoseHealth{status, service, model, device, loaded, classes}`.
 
